@@ -37,6 +37,7 @@ internal sealed partial class MelonPreferencesEditor
     private float _statusExpiresAt;
     private bool _isVisible;
     private bool _showHidden;
+    private bool _hasCenteredWindowOnce;
     private bool _isDraggingWindow;
     private global::UnityEngine.Vector2 _dragCursorOffset;
     private float _nextEventSystemRefreshTime;
@@ -284,6 +285,12 @@ internal sealed partial class MelonPreferencesEditor
 
         if (_isVisible)
         {
+            if (!_hasCenteredWindowOnce)
+            {
+                CenterWindowRectOnScreen();
+                _hasCenteredWindowOnce = true;
+            }
+
             EnsureSelectedCategory();
         }
 
@@ -309,6 +316,19 @@ internal sealed partial class MelonPreferencesEditor
         _windowRect.height = global::UnityEngine.Mathf.Clamp(_windowRect.height, minHeight, maxHeight);
         _windowRect.x = global::UnityEngine.Mathf.Clamp(_windowRect.x, 0f, Math.Max(0f, global::UnityEngine.Screen.width - _windowRect.width));
         _windowRect.y = global::UnityEngine.Mathf.Clamp(_windowRect.y, 0f, Math.Max(0f, global::UnityEngine.Screen.height - _windowRect.height));
+    }
+
+    private void CenterWindowRectOnScreen()
+    {
+        float maxWidth = Math.Max(640f, global::UnityEngine.Screen.width - 24f);
+        float maxHeight = Math.Max(420f, global::UnityEngine.Screen.height - 24f);
+        float minWidth = Math.Min(MinWindowWidth, maxWidth);
+        float minHeight = Math.Min(MinWindowHeight, maxHeight);
+
+        _windowRect.width = global::UnityEngine.Mathf.Clamp(_windowRect.width, minWidth, maxWidth);
+        _windowRect.height = global::UnityEngine.Mathf.Clamp(_windowRect.height, minHeight, maxHeight);
+        _windowRect.x = Math.Max(0f, (global::UnityEngine.Screen.width - _windowRect.width) * 0.5f);
+        _windowRect.y = Math.Max(0f, (global::UnityEngine.Screen.height - _windowRect.height) * 0.5f);
     }
 
     private void EnsureStyles()

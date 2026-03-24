@@ -111,7 +111,7 @@ internal sealed partial class MelonPreferencesEditor
 
     private void DrawMotto(global::UnityEngine.Rect rect)
     {
-        global::UnityEngine.GUI.Label(rect, "龙，可是帝王之征啊！", _mutedLabelStyle!);
+        DrawCenteredLabel(rect, "龙，可是帝王之征啊！", _mutedLabelStyle!);
     }
 
     private void DrawToolbar(global::UnityEngine.Rect rect)
@@ -143,13 +143,14 @@ internal sealed partial class MelonPreferencesEditor
             EnsureSelectedCategory();
         }
 
-        global::UnityEngine.GUI.Label(hintRect, $"{ModSettings.GetToggleKeyLabel()} 开关", _centeredLabelStyle!);
-
         if (!string.IsNullOrWhiteSpace(_statusMessage)
             && (_statusExpiresAt <= 0f || global::UnityEngine.Time.realtimeSinceStartup <= _statusExpiresAt))
         {
             global::UnityEngine.GUI.Label(hintRect, _statusMessage, _errorLabelStyle!);
+            return;
         }
+
+        DrawCenteredLabel(hintRect, $"{ModSettings.GetToggleKeyLabel()} 开关", _centeredLabelStyle!);
     }
 
     private void DrawCategoryPane(global::UnityEngine.Rect rect)
@@ -246,5 +247,20 @@ internal sealed partial class MelonPreferencesEditor
         }
 
         global::UnityEngine.GUI.EndScrollView();
+    }
+
+    private static void DrawCenteredLabel(global::UnityEngine.Rect rect, string text, global::UnityEngine.GUIStyle style)
+    {
+        global::UnityEngine.GUIContent content = new(text);
+        global::UnityEngine.Vector2 size = style.CalcSize(content);
+        float labelWidth = Math.Min(rect.width, size.x);
+        float labelHeight = Math.Min(rect.height, Math.Max(size.y, 16f));
+        global::UnityEngine.Rect labelRect = new(
+            rect.x + ((rect.width - labelWidth) * 0.5f),
+            rect.y + ((rect.height - labelHeight) * 0.5f),
+            labelWidth,
+            labelHeight);
+
+        global::UnityEngine.GUI.Label(labelRect, content, style);
     }
 }
