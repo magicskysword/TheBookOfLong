@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <LongYinGameDir>E:\SteamLibrary\steamapps\common\LongYinLiZhiZhuan</LongYinGameDir>
+    <LongYinMelonLoaderDir>$(LongYinGameDir)\MelonLoader</LongYinMelonLoaderDir>
+    <LongYinMelonNet6Dir>$(LongYinMelonLoaderDir)\net6</LongYinMelonNet6Dir>
+    <LongYinGameAssembliesDir>$(LongYinMelonLoaderDir)\Il2CppAssemblies</LongYinGameAssembliesDir>
+    <LongYinModsDir>$(LongYinGameDir)\Mods</LongYinModsDir>
+  </PropertyGroup>
+</Project>
