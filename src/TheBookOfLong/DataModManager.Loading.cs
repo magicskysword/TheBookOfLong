@@ -171,8 +171,15 @@ internal static partial class DataModManager
         string withExtension = string.IsNullOrEmpty(Path.GetExtension(normalizedPath))
             ? normalizedPath + ".csv"
             : normalizedPath;
+        string withoutExtension = Path.Combine(
+            Path.GetDirectoryName(withExtension) ?? string.Empty,
+            Path.GetFileNameWithoutExtension(withExtension));
 
         yield return withExtension;
+        if (!string.Equals(withExtension, withoutExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return NormalizeLookupKey(withoutExtension);
+        }
 
         string fileName = Path.GetFileName(withExtension);
         if (!string.IsNullOrWhiteSpace(fileName))
@@ -180,10 +187,17 @@ internal static partial class DataModManager
             yield return fileName;
         }
 
+        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(withExtension);
+        if (!string.IsNullOrWhiteSpace(fileNameWithoutExtension))
+        {
+            yield return fileNameWithoutExtension;
+        }
+
         string gameDataPrefix = "GameData" + Path.DirectorySeparatorChar;
         if (!withExtension.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
         {
             yield return Path.Combine("GameData", withExtension);
+            yield return Path.Combine("GameData", NormalizeLookupKey(withoutExtension));
         }
     }
 
@@ -207,6 +221,23 @@ internal static partial class DataModManager
         if (!normalizedPath.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
         {
             yield return Path.Combine("GameData", normalizedPath);
+        }
+
+        if (string.IsNullOrEmpty(Path.GetExtension(normalizedPath)))
+        {
+            string withExtension = normalizedPath + ".csv";
+            yield return withExtension;
+
+            string fileNameWithExtension = Path.GetFileName(withExtension);
+            if (!string.IsNullOrWhiteSpace(fileNameWithExtension))
+            {
+                yield return fileNameWithExtension;
+            }
+
+            if (!withExtension.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                yield return Path.Combine("GameData", withExtension);
+            }
         }
     }
 
