@@ -22,10 +22,7 @@ internal static partial class GameComplexDataPatchManager
                 yield break;
             }
 
-            global::Il2Cpp.WorldPlotEventController? worldPlotEventController = global::Il2Cpp.WorldPlotEventController.Instance;
-            global::Il2Cpp.MissionDataController? missionDataController = global::Il2Cpp.MissionDataController.Instance;
-
-            if (IsPatchTargetsReady(worldPlotEventController, missionDataController))
+            if (IsPatchTargetsReady(out var worldPlotEventController, out var missionDataController))
             {
                 ApplyLoadedPatchFiles(worldPlotEventController!, missionDataController!);
                 yield break;
@@ -35,10 +32,11 @@ internal static partial class GameComplexDataPatchManager
         }
     }
 
-    private static bool IsPatchTargetsReady(
-        global::Il2Cpp.WorldPlotEventController? worldPlotEventController,
-        global::Il2Cpp.MissionDataController? missionDataController)
+    private static bool IsPatchTargetsReady(out global::Il2Cpp.WorldPlotEventController? worldPlotEventController,out global::Il2Cpp.MissionDataController? missionDataController)
     {
+        worldPlotEventController = global::Il2Cpp.WorldPlotEventController.Instance;
+        missionDataController = global::Il2Cpp.MissionDataController.Instance;
+
         if (worldPlotEventController is null || missionDataController is null)
         {
             return false;
@@ -175,15 +173,27 @@ internal static partial class GameComplexDataPatchManager
             }
 
             string patchName = GetRequiredStringProperty(patchElement, "name", patchFile.FullPath, $"$[{patchIndex}]");
-            object? newItem = ConvertJsonElementToValue(patchElement, elementType, patchFile, $"$[{patchIndex}]", memberName: null);
 
             if (indexByName.TryGetValue(patchName, out int existingIndex))
             {
-                mergedItems[existingIndex] = newItem;
+                object? existingItem = mergedItems[existingIndex];
+                if (existingItem is null)
+                {
+                    object? newItem = ConvertJsonElementToValue(patchElement, elementType, patchFile, $"$[{patchIndex}]", memberName: null);
+                    SetCollectionItem(memberValue, existingIndex, newItem);
+                    mergedItems[existingIndex] = newItem;
+                }
+                else
+                {
+                    ApplyJsonObjectToExistingValue(patchElement, existingItem, patchFile, $"$[{patchIndex}]");
+                }
+
                 modifiedCount += 1;
             }
             else
             {
+                object? newItem = ConvertJsonElementToValue(patchElement, elementType, patchFile, $"$[{patchIndex}]", memberName: null);
+                AddCollectionItem(memberValue, newItem);
                 indexByName[patchName] = mergedItems.Count;
                 mergedItems.Add(newItem);
                 addedCount += 1;
@@ -191,14 +201,6 @@ internal static partial class GameComplexDataPatchManager
 
             patchIndex += 1;
         }
-
-        object newList = CreateListInstance(listType, elementType);
-        for (int i = 0; i < mergedItems.Count; i += 1)
-        {
-            AddCollectionItem(newList, mergedItems[i]);
-        }
-
-        SetMemberValue(controller, patchFile.Target.MemberName, newList);
 
         return new PatchApplyResult
         {
@@ -215,8 +217,15 @@ internal static partial class GameComplexDataPatchManager
         Type memberType = GetMemberType(controller.GetType(), patchFile.Target.MemberName)
             ?? throw new InvalidOperationException($"Could not determine member type for '{patchFile.Target.MemberName}'.");
 
-        object? newValue = ConvertJsonElementToValue(patchFile.RootElement, memberType, patchFile, "$", memberName: patchFile.Target.MemberName);
-        SetMemberValue(controller, patchFile.Target.MemberName, newValue);
+        if (!TryGetMemberValue(controller, patchFile.Target.MemberName, out object? existingValue) || existingValue is null)
+        {
+            object? newValue = ConvertJsonElementToValue(patchFile.RootElement, memberType, patchFile, "$", memberName: patchFile.Target.MemberName);
+            SetMemberValue(controller, patchFile.Target.MemberName, newValue);
+        }
+        else
+        {
+            ApplyJsonObjectToExistingValue(patchFile.RootElement, existingValue, patchFile, "$");
+        }
 
         return new PatchApplyResult
         {

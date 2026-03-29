@@ -129,17 +129,67 @@ internal static partial class GameComplexDataPatchManager
         addMethod.Invoke(collection, new[] { item });
     }
 
+    private static void SetCollectionItem(object collection, int index, object? item)
+    {
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        PropertyInfo? itemProperty = collection.GetType().GetProperty("Item", Flags, null, null, new[] { typeof(int) }, null);
+        if (itemProperty is not null && itemProperty.CanWrite)
+        {
+            itemProperty.SetValue(collection, item, new object[] { index });
+            return;
+        }
+
+        MethodInfo? setter = collection.GetType().GetMethod("set_Item", Flags, null, new[] { typeof(int), item?.GetType() ?? typeof(object) }, null);
+        if (setter is not null)
+        {
+            setter.Invoke(collection, new[] { (object)index, item });
+            return;
+        }
+
+        throw new InvalidOperationException($"Collection type '{collection.GetType().FullName}' does not expose a usable indexed setter.");
+    }
+
+    private static void RemoveCollectionItemAt(object collection, int index)
+    {
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo? removeAtMethod = collection.GetType().GetMethod("RemoveAt", Flags, null, new[] { typeof(int) }, null);
+        if (removeAtMethod is null)
+        {
+            throw new InvalidOperationException($"Collection type '{collection.GetType().FullName}' does not expose a usable RemoveAt method.");
+        }
+
+        removeAtMethod.Invoke(collection, new object[] { index });
+    }
+
     private static List<object?> EnumerateCollection(object collection)
     {
-        if (collection is not IEnumerable enumerable)
+        if (collection is IEnumerable enumerable)
+        {
+            List<object?> enumerableItems = new();
+            foreach (object? item in enumerable)
+            {
+                enumerableItems.Add(item);
+            }
+
+            return enumerableItems;
+        }
+
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        PropertyInfo? countProperty = collection.GetType().GetProperty("Count", Flags);
+        PropertyInfo? itemProperty = collection.GetType().GetProperty("Item", Flags, null, null, new[] { typeof(int) }, null);
+        if (countProperty is null || itemProperty is null || !countProperty.CanRead || !itemProperty.CanRead)
         {
             throw new InvalidOperationException($"Value '{collection.GetType().FullName}' is not enumerable.");
         }
 
-        List<object?> items = new();
-        foreach (object? item in enumerable)
+        object? rawCount = countProperty.GetValue(collection);
+        int count = rawCount is null ? 0 : Convert.ToInt32(rawCount);
+
+        List<object?> items = new(count);
+        for (int i = 0; i < count; i += 1)
         {
-            items.Add(item);
+            items.Add(itemProperty.GetValue(collection, new object[] { i }));
         }
 
         return items;

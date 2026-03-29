@@ -6,6 +6,153 @@ namespace TheBookOfLong;
 
 internal static partial class GameComplexDataPatchManager
 {
+    private static void ApplyJsonObjectToExistingValue(
+        JsonElement element,
+        object target,
+        ComplexJsonPatchFile patchFile,
+        string jsonPath)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"Expected a JSON object for '{jsonPath}', but got '{element.ValueKind}'.");
+        }
+
+        Dictionary<string, PatchableMember> members = GetPatchableMembers(target.GetType());
+        foreach (JsonProperty jsonProperty in element.EnumerateObject())
+        {
+            if (!members.TryGetValue(jsonProperty.Name, out PatchableMember? member))
+            {
+                continue;
+            }
+
+            object? currentValue = member.Getter(target);
+            object? patchedValue = PatchOrConvertJsonElement(
+                jsonProperty.Value,
+                member.ValueType,
+                currentValue,
+                patchFile,
+                $"{jsonPath}.{jsonProperty.Name}",
+                member.Name);
+
+            member.Setter(target, patchedValue);
+        }
+    }
+
+    private static object? PatchOrConvertJsonElement(
+        JsonElement element,
+        Type targetType,
+        object? existingValue,
+        ComplexJsonPatchFile patchFile,
+        string jsonPath,
+        string? memberName)
+    {
+        Type? nullableUnderlyingType = Nullable.GetUnderlyingType(targetType);
+        Type effectiveType = nullableUnderlyingType ?? targetType;
+
+        if (element.ValueKind == JsonValueKind.Null)
+        {
+            return ConvertJsonElementToValue(element, targetType, patchFile, jsonPath, memberName);
+        }
+
+        if (string.Equals(memberName, "plotID", StringComparison.Ordinal) && effectiveType == typeof(int))
+        {
+            return ResolvePlotIdValue(element, patchFile, jsonPath);
+        }
+
+        if (effectiveType == typeof(string)
+            || effectiveType.IsEnum
+            || effectiveType == typeof(bool)
+            || effectiveType == typeof(byte)
+            || effectiveType == typeof(sbyte)
+            || effectiveType == typeof(short)
+            || effectiveType == typeof(ushort)
+            || effectiveType == typeof(int)
+            || effectiveType == typeof(uint)
+            || effectiveType == typeof(long)
+            || effectiveType == typeof(ulong)
+            || effectiveType == typeof(float)
+            || effectiveType == typeof(double)
+            || effectiveType == typeof(decimal)
+            || effectiveType == typeof(char)
+            || effectiveType == typeof(DateTime)
+            || effectiveType == typeof(Guid))
+        {
+            return ConvertJsonElementToValue(element, targetType, patchFile, jsonPath, memberName);
+        }
+
+        if (TryResolveCollectionElementType(effectiveType, out Type? elementType))
+        {
+            if (element.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException($"Expected a JSON array for '{jsonPath}', but got '{element.ValueKind}'.");
+            }
+
+            object collection = existingValue ?? CreateListInstance(effectiveType, elementType!);
+            ApplyJsonArrayToExistingCollection(element, collection, elementType!, patchFile, jsonPath);
+            return collection;
+        }
+
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return ConvertJsonElementToValue(element, targetType, patchFile, jsonPath, memberName);
+        }
+
+        object instance = existingValue ?? CreateObjectInstance(effectiveType);
+        ApplyJsonObjectToExistingValue(element, instance, patchFile, jsonPath);
+        return instance;
+    }
+
+    private static void ApplyJsonArrayToExistingCollection(
+        JsonElement element,
+        object collection,
+        Type elementType,
+        ComplexJsonPatchFile patchFile,
+        string jsonPath)
+    {
+        List<object?> existingItems = EnumerateCollection(collection);
+        int patchCount = 0;
+
+        foreach (JsonElement itemElement in element.EnumerateArray())
+        {
+            string itemPath = $"{jsonPath}[{patchCount}]";
+            if (patchCount < existingItems.Count)
+            {
+                object? currentItem = existingItems[patchCount];
+                object? patchedItem = PatchOrConvertJsonElement(
+                    itemElement,
+                    elementType,
+                    currentItem,
+                    patchFile,
+                    itemPath,
+                    memberName: null);
+
+                if (!ReferenceEquals(currentItem, patchedItem) || currentItem is null)
+                {
+                    SetCollectionItem(collection, patchCount, patchedItem);
+                }
+            }
+            else
+            {
+                object? newItem = PatchOrConvertJsonElement(
+                    itemElement,
+                    elementType,
+                    existingValue: null,
+                    patchFile,
+                    itemPath,
+                    memberName: null);
+
+                AddCollectionItem(collection, newItem);
+            }
+
+            patchCount += 1;
+        }
+
+        for (int index = existingItems.Count - 1; index >= patchCount; index -= 1)
+        {
+            RemoveCollectionItemAt(collection, index);
+        }
+    }
+
     /// <summary>
     /// 把 JSON 递归转换为目标 IL2CPP 对象图。
     /// 这里不是通用序列化器，而是面向补丁场景的“按成员名定向赋值”，因此会额外处理 plotID 这样的特殊字段。
