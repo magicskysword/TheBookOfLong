@@ -5,6 +5,11 @@ namespace TheBookOfLong;
 
 internal static class ModSettings
 {
+    private const string SettingsCategoryId = "TheBookOfLong_UI";
+    private const string ToggleKeyId = "toggle_key";
+    private const string AutoOpenOnStartupId = "auto_open_on_startup";
+    private const string AutoOpenDelaySecondsId = "auto_open_delay_seconds";
+
     private static MelonPreferences_Category? _settingsCategory;
     private static MelonPreferences_Entry<global::UnityEngine.KeyCode>? _toggleKeyEntry;
     private static MelonPreferences_Entry<bool>? _autoOpenOnStartupEntry;
@@ -12,13 +17,34 @@ internal static class ModSettings
 
     internal static void Initialize()
     {
-        _settingsCategory ??= MelonPreferences.CreateCategory("TheBookOfLong.UI", "界面设置");
-        _toggleKeyEntry ??= _settingsCategory.CreateEntry("配置界面开关键", global::UnityEngine.KeyCode.F4);
-        _autoOpenOnStartupEntry ??= _settingsCategory.CreateEntry("启动后自动打开配置界面", true);
+        _settingsCategory ??= MelonPreferences.CreateCategory(SettingsCategoryId, "界面设置");
+        _toggleKeyEntry ??= _settingsCategory.CreateEntry(
+            ToggleKeyId,
+            global::UnityEngine.KeyCode.F4,
+            "配置界面开关键",
+            string.Empty,
+            is_hidden: false,
+            dont_save_default: false,
+            validator: null,
+            oldIdentifier: "配置界面开关键");
+        _autoOpenOnStartupEntry ??= _settingsCategory.CreateEntry(
+            AutoOpenOnStartupId,
+            true,
+            "启动后自动打开配置界面",
+            string.Empty,
+            is_hidden: false,
+            dont_save_default: false,
+            validator: null,
+            oldIdentifier: "启动后自动打开配置界面");
         _autoOpenDelaySecondsEntry ??= _settingsCategory.CreateEntry(
-            "自动打开延迟秒数",
+            AutoOpenDelaySecondsId,
             2.5f,
-            validator: new ValueRange<float>(0f, 15f));
+            "自动打开延迟秒数",
+            string.Empty,
+            is_hidden: false,
+            dont_save_default: false,
+            validator: new ValueRange<float>(0f, 15f),
+            oldIdentifier: "自动打开延迟秒数");
     }
 
     internal static global::UnityEngine.KeyCode GetToggleKey()
