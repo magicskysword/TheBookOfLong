@@ -1,18 +1,13 @@
-using System.Collections.Generic;
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 
 namespace TheBookOfLong;
 
-[HarmonyPatch]
+[HarmonyPatch(typeof(global::Il2Cpp.GameDataController), "LoadAllGameData")]
 internal static class GameDataControllerLoadAllGameDataPatch
 {
-    private static MethodBase? TargetMethod()
-    {
-        return AccessTools.Method("GameDataController:LoadAllGameData");
-    }
-
     private static void Prefix()
     {
         ConfigDumpManager.BeginCapture("GameDataController.LoadAllGameData");
@@ -24,14 +19,9 @@ internal static class GameDataControllerLoadAllGameDataPatch
     }
 }
 
-[HarmonyPatch]
+[HarmonyPatch(typeof(global::Il2Cpp.GameDataController), "LoadPeotryData")]
 internal static class GameDataControllerLoadPeotryDataPatch
 {
-    private static MethodBase? TargetMethod()
-    {
-        return AccessTools.Method("GameDataController:LoadPeotryData");
-    }
-
     private static void Prefix()
     {
         ConfigDumpManager.BeginCapture("GameDataController.LoadPeotryData");
@@ -43,28 +33,18 @@ internal static class GameDataControllerLoadPeotryDataPatch
     }
 }
 
-[HarmonyPatch]
+[HarmonyPatch(typeof(global::Il2Cpp.LTCSVLoader), "ReadMultiLine")]
 internal static class LTCSVLoaderReadMultiLinePatch
 {
-    private static MethodBase? TargetMethod()
-    {
-        return AccessTools.Method("LTCSVLoader:ReadMultiLine");
-    }
-
     private static void Prefix(string str)
     {
         ConfigDumpManager.CaptureLoaderInput("ReadMultiLine", str);
     }
 }
 
-[HarmonyPatch]
+[HarmonyPatch(typeof(global::Il2Cpp.LTCSVLoader), "ReadFile")]
 internal static class LTCSVLoaderReadFilePatch
 {
-    private static MethodBase? TargetMethod()
-    {
-        return AccessTools.Method("LTCSVLoader:ReadFile");
-    }
-
     private static void Prefix(string fileName)
     {
         ConfigDumpManager.CaptureLoaderFile("ReadFile", fileName);

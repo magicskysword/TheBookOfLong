@@ -18,6 +18,7 @@ public sealed class MainMod : MelonMod
     {
         ModSettings.Initialize();
         ConfigDumpManager.Initialize();
+        GameComplexDataDumpManager.Initialize();
         DataModManager.Initialize();
 
         _harmony = new HarmonyLib.Harmony("TheBookOfLong.ConfigDump");

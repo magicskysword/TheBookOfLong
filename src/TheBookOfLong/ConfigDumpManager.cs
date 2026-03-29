@@ -1,11 +1,11 @@
 using System;
-using System.Collections.Generic;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Reflection;
 
 namespace TheBookOfLong;
 
@@ -32,7 +32,6 @@ internal static class ConfigDumpManager
     private static int _pendingSourceId;
     private static string _activeTrigger = string.Empty;
     private static DateTime _captureStartedUtc;
-
     internal static string DumpRoot => _dumpRoot;
 
     internal static void Initialize()
@@ -93,7 +92,7 @@ internal static class ConfigDumpManager
 
     internal static void CaptureLoadedResource(string? resourcePath, object? asset)
     {
-        if (!IsCaptureActive() || string.IsNullOrWhiteSpace(resourcePath) || asset is not UnityEngine.Object unityObject)
+        if (!IsCaptureActive() || string.IsNullOrWhiteSpace(resourcePath) || asset is not global::UnityEngine.Object unityObject)
         {
             return;
         }
@@ -114,7 +113,7 @@ internal static class ConfigDumpManager
         }
     }
 
-    internal static void CaptureTextAssetRead(UnityEngine.TextAsset textAsset, string? fallbackText)
+    internal static void CaptureTextAssetRead(global::UnityEngine.TextAsset textAsset, string? fallbackText)
     {
         if (!IsCaptureActive())
         {
@@ -149,13 +148,13 @@ internal static class ConfigDumpManager
         }
     }
 
-    internal static string ResolveBestTextAssetContent(UnityEngine.TextAsset textAsset, string? fallbackText, out string encodingName)
+    internal static string ResolveBestTextAssetContent(global::UnityEngine.TextAsset textAsset, string? fallbackText, out string encodingName)
     {
         byte[]? rawBytes = TryGetTextAssetBytes(textAsset);
         return DecodeBest(rawBytes, fallbackText ?? string.Empty, out encodingName);
     }
 
-    internal static void RegisterAdditionalTextAssetContent(UnityEngine.TextAsset textAsset, string? content)
+    internal static void RegisterAdditionalTextAssetContent(global::UnityEngine.TextAsset textAsset, string? content)
     {
         if (!IsCaptureActive() || string.IsNullOrEmpty(content))
         {
@@ -380,7 +379,7 @@ internal static class ConfigDumpManager
         return string.Join(Path.DirectorySeparatorChar, segments);
     }
 
-    private static string ResolveTextAssetSourcePath(UnityEngine.TextAsset textAsset)
+    private static string ResolveTextAssetSourcePath(global::UnityEngine.TextAsset textAsset)
     {
         try
         {
@@ -412,11 +411,11 @@ internal static class ConfigDumpManager
         return $"TextAsset_{_anonymousTableIndex:D4}";
     }
 
-    private static byte[]? TryGetTextAssetBytes(UnityEngine.TextAsset textAsset)
+    private static byte[]? TryGetTextAssetBytes(global::UnityEngine.TextAsset textAsset)
     {
         try
         {
-            PropertyInfo? bytesProperty = typeof(UnityEngine.TextAsset).GetProperty("bytes", BindingFlags.Instance | BindingFlags.Public);
+            PropertyInfo? bytesProperty = typeof(global::UnityEngine.TextAsset).GetProperty("bytes", BindingFlags.Instance | BindingFlags.Public);
             object? rawValue = bytesProperty?.GetValue(textAsset);
             return ConvertToManagedBytes(rawValue);
         }
