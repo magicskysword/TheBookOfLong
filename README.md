@@ -81,13 +81,13 @@ Mods
 补丁文件路径应与导出的配置名保持一致，例如导出得到：
 
 ```text
-DataDump\Latest\GameData\NameData.csv
+DataDump\Latest\Data\NameData.csv
 ```
 
 则补丁文件应放在：
 
 ```text
-Mods\ModsOfLong\modMyFirstMod\Data\GameData\NameData.csv
+Mods\ModsOfLong\modMyFirstMod\Data\NameData.csv
 ```
 
 合并规则：
@@ -122,8 +122,8 @@ modMyCustomNpc
 对于导出的复杂对象数据，可在 Mod 目录中放置与导出名一致的 JSON 文件：
 
 ```text
-Mods\ModsOfLong\modMyFirstMod\Data\GameComplexData\WorldPlotEventController_WorldPlotEventDataBase.json
-Mods\ModsOfLong\modMyFirstMod\Data\GameComplexData\MissionDataController_MainMissionDataBase.json
+Mods\ModsOfLong\modMyFirstMod\ComplexData\WorldPlotEventController_WorldPlotEventDataBase.json
+Mods\ModsOfLong\modMyFirstMod\ComplexData\MissionDataController_MainMissionDataBase.json
 ```
 
 当前支持以下文件：

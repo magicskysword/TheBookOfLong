@@ -21,7 +21,7 @@ internal static class ConfigDumpManager
     private static readonly HashSet<int> ConsumedPendingSourceIds = new();
     private static readonly Dictionary<string, string> SpecialExportExtensionsBySourcePath = new(StringComparer.OrdinalIgnoreCase)
     {
-        [Path.Combine("GameData", "PoetryData")] = ".json"
+        [Path.Combine("Data", "PoetryData")] = ".json"
     };
 
     private static string _gameRoot = string.Empty;
@@ -298,7 +298,7 @@ internal static class ConfigDumpManager
         lock (Sync)
         {
             string normalizedSourcePath = NormalizeSourcePath(sourcePath);
-            string relativePath = EnsureTextExtension(normalizedSourcePath);
+            string relativePath = EnsureTextExtension(MapDumpRelativePath(normalizedSourcePath));
             string contentHash = ComputeHash(content);
 
             SaveContent(relativePath, content, dumpType, normalizedSourcePath, contentHash, encodingName);
@@ -617,6 +617,22 @@ internal static class ConfigDumpManager
         }
 
         return relativePath + ".csv";
+    }
+
+    private static string MapDumpRelativePath(string normalizedSourcePath)
+    {
+        string gameDataPrefix = "GameData" + Path.DirectorySeparatorChar;
+        if (normalizedSourcePath.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.Combine("Data", normalizedSourcePath.Substring(gameDataPrefix.Length));
+        }
+
+        if (string.Equals(normalizedSourcePath, "GameData", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Data";
+        }
+
+        return normalizedSourcePath;
     }
 
     private static string BuildSafeRelativePath(string fullPath)

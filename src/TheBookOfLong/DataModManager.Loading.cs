@@ -102,6 +102,8 @@ internal static partial class DataModManager
             };
 
             RegisterCsvSymbolicReferences(csvPatchFile);
+            MelonLogger.Msg(
+                $"Loaded data patch '{modName}': '{csvPatchFile.RelativePath}' -> '{csvPatchFile.SourcePath}'");
 
             return true;
         }

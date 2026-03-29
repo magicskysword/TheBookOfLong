@@ -22,7 +22,8 @@ internal static partial class GameComplexDataPatchManager
                 yield break;
             }
 
-            if (IsPatchTargetsReady(out var worldPlotEventController, out var missionDataController))
+            if (GameComplexDataDumpManager.IsExportCompleted
+                && IsPatchTargetsReady(out var worldPlotEventController, out var missionDataController))
             {
                 ApplyLoadedPatchFiles(worldPlotEventController!, missionDataController!);
                 yield break;

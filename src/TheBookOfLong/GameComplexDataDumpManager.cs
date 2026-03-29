@@ -35,6 +35,17 @@ internal static class GameComplexDataDumpManager
     private static string _latestRoot = string.Empty;
     private static ExportState _exportState;
 
+    internal static bool IsExportCompleted
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _exportState is ExportState.Completed or ExportState.Failed;
+            }
+        }
+    }
+
     internal static void Initialize()
     {
         lock (Sync)
@@ -76,8 +87,7 @@ internal static class GameComplexDataDumpManager
             global::Il2Cpp.WorldPlotEventController? worldPlotEventController = global::Il2Cpp.WorldPlotEventController.Instance;
             global::Il2Cpp.MissionDataController? missionDataController = global::Il2Cpp.MissionDataController.Instance;
 
-            if (GameComplexDataPatchManager.IsApplyCompleted
-                && IsComplexDataReady(worldPlotEventController, missionDataController))
+            if (IsComplexDataReady(worldPlotEventController, missionDataController))
             {
                 ExportComplexData(worldPlotEventController!, missionDataController!);
                 yield break;
@@ -461,7 +471,7 @@ internal static class GameComplexDataDumpManager
 
     private static string PrepareComplexDataRoot()
     {
-        string complexDataRoot = Path.Combine(_latestRoot, "GameComplexData");
+        string complexDataRoot = Path.Combine(_latestRoot, "ComplexData");
         if (Directory.Exists(complexDataRoot))
         {
             Directory.Delete(complexDataRoot, recursive: true);

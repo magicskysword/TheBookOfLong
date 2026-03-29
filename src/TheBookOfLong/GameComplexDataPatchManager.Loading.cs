@@ -60,19 +60,19 @@ internal static partial class GameComplexDataPatchManager
         {
             string modDirectory = modDirectories[modIndex];
             string modName = ResolveDataModDisplayName(modDirectory);
-            string dataDirectory = Path.Combine(modDirectory, "Data");
-            if (!Directory.Exists(dataDirectory))
+            string complexDataDirectory = Path.Combine(modDirectory, "ComplexData");
+            if (!Directory.Exists(complexDataDirectory))
             {
                 continue;
             }
 
-            string[] patchFiles = Directory.GetFiles(dataDirectory, "*.json", SearchOption.AllDirectories);
+            string[] patchFiles = Directory.GetFiles(complexDataDirectory, "*.json", SearchOption.AllDirectories);
             Array.Sort(patchFiles, StringComparer.OrdinalIgnoreCase);
 
             for (int patchIndex = 0; patchIndex < patchFiles.Length; patchIndex += 1)
             {
                 string patchFilePath = patchFiles[patchIndex];
-                if (TryLoadPatchFile(modName, dataDirectory, patchFilePath, ++loadOrder, out ComplexJsonPatchFile? patchFile))
+                if (TryLoadPatchFile(modName, complexDataDirectory, patchFilePath, ++loadOrder, out ComplexJsonPatchFile? patchFile))
                 {
                     LoadedPatchFiles.Add(patchFile!);
                 }
@@ -88,14 +88,14 @@ internal static partial class GameComplexDataPatchManager
 
     private static bool TryLoadPatchFile(
         string modName,
-        string dataDirectory,
+        string complexDataDirectory,
         string patchFilePath,
         int loadOrder,
         out ComplexJsonPatchFile? patchFile)
     {
         patchFile = null;
 
-        string relativePath = NormalizeLookupKey(Path.GetRelativePath(dataDirectory, patchFilePath));
+        string relativePath = NormalizeLookupKey(Path.GetRelativePath(complexDataDirectory, patchFilePath));
         string canonicalRelativePath = BuildCanonicalComplexDataPath(relativePath);
         string fileName = Path.GetFileName(canonicalRelativePath);
 
@@ -233,10 +233,10 @@ internal static partial class GameComplexDataPatchManager
             ? normalizedPath + ".json"
             : normalizedPath;
 
-        string prefix = "GameComplexData" + Path.DirectorySeparatorChar;
+        string prefix = "ComplexData" + Path.DirectorySeparatorChar;
         if (!withExtension.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
-            withExtension = Path.Combine("GameComplexData", withExtension);
+            withExtension = Path.Combine("ComplexData", withExtension);
         }
 
         return NormalizeLookupKey(withExtension);

@@ -409,7 +409,18 @@ internal static partial class DataModManager
 
     private static string GetLatestDumpPath(string sourcePath)
     {
-        return Path.Combine(_gameRoot, "DataDump", "Latest", sourcePath);
+        string normalizedSourcePath = NormalizeLookupKey(sourcePath);
+        string gameDataPrefix = "GameData" + Path.DirectorySeparatorChar;
+        if (normalizedSourcePath.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedSourcePath = Path.Combine("Data", normalizedSourcePath.Substring(gameDataPrefix.Length));
+        }
+        else if (string.Equals(normalizedSourcePath, "GameData", StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedSourcePath = "Data";
+        }
+
+        return Path.Combine(_gameRoot, "DataDump", "Latest", normalizedSourcePath);
     }
 
     private static string FormatSourcePathList(IEnumerable<string> sourcePaths)
