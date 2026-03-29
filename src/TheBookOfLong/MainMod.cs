@@ -18,6 +18,9 @@ public sealed class MainMod : MelonMod
     {
         ModSettings.Initialize();
         ConfigDumpManager.Initialize();
+        SymbolicFieldManager.Initialize();
+        SymbolicFieldManager.Reset();
+        GameComplexDataPatchManager.Initialize();
         GameComplexDataDumpManager.Initialize();
         DataModManager.Initialize();
 

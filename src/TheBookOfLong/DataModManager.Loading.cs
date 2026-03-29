@@ -1,0 +1,241 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using MelonLoader;
+
+namespace TheBookOfLong;
+
+internal static partial class DataModManager
+{
+    private static DataModDefinition LoadDataMod(string modDirectory, List<CsvPatchFile> csvPatchFiles)
+    {
+        string folderName = Path.GetFileName(modDirectory);
+        string displayName = ResolveDataModDisplayName(modDirectory, folderName);
+        string dataDirectory = Path.Combine(modDirectory, "Data");
+        int patchFileCount = 0;
+
+        if (Directory.Exists(dataDirectory))
+        {
+            string[] patchFiles = Directory.GetFiles(dataDirectory, "*.csv", SearchOption.AllDirectories);
+            Array.Sort(patchFiles, StringComparer.OrdinalIgnoreCase);
+
+            foreach (string patchFilePath in patchFiles)
+            {
+                if (TryLoadCsvPatchFile(displayName, dataDirectory, patchFilePath, out CsvPatchFile? csvPatchFile))
+                {
+                    csvPatchFiles.Add(csvPatchFile!);
+                    patchFileCount += 1;
+                }
+            }
+        }
+
+        return new DataModDefinition
+        {
+            FolderName = folderName,
+            DisplayName = displayName,
+            ModDirectory = modDirectory,
+            DataDirectory = dataDirectory,
+            PatchFileCount = patchFileCount
+        };
+    }
+
+    private static string ResolveDataModDisplayName(string modDirectory, string folderName)
+    {
+        string infoFilePath = Path.Combine(modDirectory, "Info.json");
+        if (File.Exists(infoFilePath))
+        {
+            try
+            {
+                string json = File.ReadAllText(infoFilePath, Utf8NoBom);
+                DataModInfoFile? info = JsonSerializer.Deserialize<DataModInfoFile>(
+                    json,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+
+                if (!string.IsNullOrWhiteSpace(info?.Name))
+                {
+                    return info.Name.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Failed to read data mod info '{infoFilePath}': {ex.Message}");
+            }
+        }
+
+        string fallbackName = folderName.StartsWith("mod", StringComparison.OrdinalIgnoreCase)
+            ? folderName.Substring(3).TrimStart(' ', '_', '-')
+            : folderName;
+
+        return string.IsNullOrWhiteSpace(fallbackName) ? folderName : fallbackName;
+    }
+
+    private static bool TryLoadCsvPatchFile(string modName, string dataDirectory, string patchFilePath, out CsvPatchFile? csvPatchFile)
+    {
+        csvPatchFile = null;
+
+        try
+        {
+            string content = File.ReadAllText(patchFilePath, Utf8NoBom);
+            List<List<string>> rows = ParseCsv(content);
+            if (rows.Count == 0)
+            {
+                MelonLogger.Warning($"Skipped empty data patch file '{patchFilePath}'.");
+                return false;
+            }
+
+            string relativePath = NormalizeLookupKey(Path.GetRelativePath(dataDirectory, patchFilePath));
+            int keyColumnIndex = ResolveKeyColumnIndex(rows[0]);
+            csvPatchFile = new CsvPatchFile
+            {
+                ModName = modName,
+                FullPath = patchFilePath,
+                RelativePath = relativePath,
+                SourcePath = BuildCanonicalSourcePath(relativePath),
+                KeyColumnIndex = keyColumnIndex,
+                LoadOrder = ++_patchFileOrder,
+                SymbolicIds = CollectSymbolicIds(rows, keyColumnIndex),
+                Rows = rows
+            };
+
+            RegisterCsvSymbolicReferences(csvPatchFile);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MelonLogger.Warning($"Failed to load data patch file '{patchFilePath}': {ex.Message}");
+            return false;
+        }
+    }
+
+    private static void RegisterCsvPatch(CsvPatchFile csvPatchFile)
+    {
+        foreach (string lookupKey in BuildPatchLookupKeys(csvPatchFile.RelativePath))
+        {
+            if (!CsvPatchesByLookupKey.TryGetValue(lookupKey, out List<CsvPatchFile>? patchFiles))
+            {
+                patchFiles = new List<CsvPatchFile>();
+                CsvPatchesByLookupKey[lookupKey] = patchFiles;
+            }
+
+            patchFiles.Add(csvPatchFile);
+        }
+    }
+
+    private static List<CsvPatchFile> GetMatchingCsvPatches(string sourcePath)
+    {
+        List<CsvPatchFile> matches = new();
+        HashSet<string> seenPatchFiles = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string lookupKey in BuildSourceLookupKeys(sourcePath))
+        {
+            if (!CsvPatchesByLookupKey.TryGetValue(lookupKey, out List<CsvPatchFile>? patchFiles))
+            {
+                continue;
+            }
+
+            foreach (CsvPatchFile patchFile in patchFiles)
+            {
+                if (seenPatchFiles.Add(patchFile.FullPath))
+                {
+                    matches.Add(patchFile);
+                }
+            }
+        }
+
+        matches.Sort(static (left, right) =>
+        {
+            int compare = left.LoadOrder.CompareTo(right.LoadOrder);
+            return compare != 0
+                ? compare
+                : string.Compare(left.FullPath, right.FullPath, StringComparison.OrdinalIgnoreCase);
+        });
+
+        return matches;
+    }
+
+    private static IEnumerable<string> BuildPatchLookupKeys(string relativePath)
+    {
+        string normalizedPath = NormalizeLookupKey(relativePath);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            yield break;
+        }
+
+        string withExtension = string.IsNullOrEmpty(Path.GetExtension(normalizedPath))
+            ? normalizedPath + ".csv"
+            : normalizedPath;
+
+        yield return withExtension;
+
+        string fileName = Path.GetFileName(withExtension);
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            yield return fileName;
+        }
+
+        string gameDataPrefix = "GameData" + Path.DirectorySeparatorChar;
+        if (!withExtension.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return Path.Combine("GameData", withExtension);
+        }
+    }
+
+    private static IEnumerable<string> BuildSourceLookupKeys(string sourcePath)
+    {
+        string normalizedPath = NormalizeLookupKey(sourcePath);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            yield break;
+        }
+
+        yield return normalizedPath;
+
+        string fileName = Path.GetFileName(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            yield return fileName;
+        }
+
+        string gameDataPrefix = "GameData" + Path.DirectorySeparatorChar;
+        if (!normalizedPath.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return Path.Combine("GameData", normalizedPath);
+        }
+    }
+
+    private static string ResolveTextAssetSourcePath(global::UnityEngine.TextAsset textAsset)
+    {
+        try
+        {
+            int instanceId = textAsset.GetInstanceID();
+            lock (Sync)
+            {
+                if (ResourcePathsByInstanceId.TryGetValue(instanceId, out string? resourcePath) && !string.IsNullOrWhiteSpace(resourcePath))
+                {
+                    return resourcePath;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(textAsset.name))
+            {
+                return NormalizeLookupKey(textAsset.name);
+            }
+        }
+        catch
+        {
+        }
+
+        return string.Empty;
+    }
+}

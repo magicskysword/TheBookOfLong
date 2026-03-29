@@ -7,6 +7,7 @@ internal static class GameControllerStartComplexDataDumpPatch
 {
     private static void Postfix()
     {
+        GameComplexDataPatchManager.TryStartApply();
         GameComplexDataDumpManager.TryStartExport();
     }
 }

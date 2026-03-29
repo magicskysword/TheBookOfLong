@@ -117,6 +117,58 @@ modMyCustomNpc
 
 该机制使得多个Mod添加相同内容不易出现ID冲突和覆盖问题。
 
+### 游戏复杂数据 JSON 补丁规则
+
+对于导出的复杂对象数据，可在 Mod 目录中放置与导出名一致的 JSON 文件：
+
+```text
+Mods\ModsOfLong\modMyFirstMod\Data\GameComplexData\WorldPlotEventController_WorldPlotEventDataBase.json
+Mods\ModsOfLong\modMyFirstMod\Data\GameComplexData\MissionDataController_MainMissionDataBase.json
+```
+
+当前支持以下文件：
+
+**游戏任务配置**
+- `MissionDataController_bountyMissionDataBase.json`
+- `MissionDataController_BranchMissionDataBase.json`
+- `MissionDataController_LittleMissionDataBase.json`
+- `MissionDataController_MainMissionDataBase.json`
+- `MissionDataController_SpeKillerMissionDataBase.json`
+- `MissionDataController_TreasureMapMissionDataBase.json`
+
+**游戏触发器配置**
+- `WorldPlotEventController_WorldPlotEventDataBase.json`
+
+处理规则：
+
+1. 四个 `MissionDataController_*MissionDataBase.json` 列表文件和 `WorldPlotEventController_WorldPlotEventDataBase.json` 使用 JSON 数组补丁。
+2. 数组内对象按 `name` 字段匹配。
+3. `name` 相同则覆盖原对象。
+4. `name` 不同则追加新对象。
+5. `MissionDataController_SpeKillerMissionDataBase.json` 与 `MissionDataController_TreasureMapMissionDataBase.json` 使用单个 JSON 对象直接覆盖原值。
+
+### 剧情相关 plotID 字段
+
+在 `MissionData` 与 `WorldPlotEventData` 的 `plotID` 字段中，也可以使用字符串占位符：
+
+```json
+{
+  "plotID": "modMyPlot001"
+}
+```
+
+处理规则与 CSV 的字符串 ID 一致：
+
+1. `plotID` 中以 `mod` 开头的字符串会被识别为符号 ID。
+2. 它会按 `GameData\PlotData.csv` 的最大现有 ID 继续分配新的数字 ID。
+3. 如果同一个符号 ID 同时出现在 CSV 与复杂对象 JSON 中，它们会映射成同一个数字 ID。
+
+所有符号 ID 的引用情况和最终映射会写入：
+
+```text
+DataDump\Latest\SymbolicFieldReport.json
+```
+
 ## Build
 
 ### 准备工作

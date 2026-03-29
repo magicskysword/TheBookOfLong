@@ -76,7 +76,8 @@ internal static class GameComplexDataDumpManager
             global::Il2Cpp.WorldPlotEventController? worldPlotEventController = global::Il2Cpp.WorldPlotEventController.Instance;
             global::Il2Cpp.MissionDataController? missionDataController = global::Il2Cpp.MissionDataController.Instance;
 
-            if (IsComplexDataReady(worldPlotEventController, missionDataController))
+            if (GameComplexDataPatchManager.IsApplyCompleted
+                && IsComplexDataReady(worldPlotEventController, missionDataController))
             {
                 ExportComplexData(worldPlotEventController!, missionDataController!);
                 yield break;
