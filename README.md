@@ -263,7 +263,8 @@ TheBookOfLong
       │  ├─ ComplexPatchModels.cs
       │  ├─ ComplexTypeAccessor.cs
       │  ├─ ComplexJsonValuePatcher.cs
-      │  └─ ComplexRuntimePatchApplier.cs
+      │  ├─ GameComplexDataPatchManager.ApplyCycle.cs
+      │  └─ ComplexPatchExecutor.cs
       ├─ MainMod.cs
       ├─ Mods
       │  ├─ IModProject.cs

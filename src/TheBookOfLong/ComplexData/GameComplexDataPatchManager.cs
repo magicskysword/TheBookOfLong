@@ -41,17 +41,6 @@ internal static partial class GameComplexDataPatchManager
     private static int _waitingDumpCycleId;
     private static bool _isInitialized;
 
-    internal static bool IsApplyCompleted
-    {
-        get
-        {
-            lock (Sync)
-            {
-                return _applyState is ApplyState.Completed or ApplyState.Failed or ApplyState.NoPatches;
-            }
-        }
-    }
-
     internal static void Initialize()
     {
         lock (Sync)
@@ -112,7 +101,6 @@ internal static partial class GameComplexDataPatchManager
 
     private enum ApplyState
     {
-        NotStarted,
         NoPatches,
         WaitingForSceneData,
         Applying,

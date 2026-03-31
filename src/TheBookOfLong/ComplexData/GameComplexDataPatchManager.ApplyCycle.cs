@@ -1,12 +1,13 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Text.Json;
 
 namespace TheBookOfLong;
 
 internal static partial class GameComplexDataPatchManager
 {
+    // 这一段只负责“等待这一轮 Dump 完成，再把已加载的补丁交给执行器”。
+    // 真正的对象写入逻辑放在 ComplexPatchExecutor，避免 manager 同时承担时序和写入细节。
     private static IEnumerator WaitAndApplyPatches(int applyCycleId, int dumpCycleId)
     {
         while (true)
@@ -98,7 +99,7 @@ internal static partial class GameComplexDataPatchManager
                     ? worldPlotEventController
                     : missionDataController;
 
-                ComplexPatchApplyResult applyResult = ComplexRuntimePatchApplier.ApplyPatch(controller, patchFile);
+                ComplexPatchApplyResult applyResult = ComplexPatchExecutor.ApplyPatch(controller, patchFile);
 
                 if (!resultsByMod.TryGetValue(patchFile.ModName, out List<ComplexPatchApplyResult>? modResults))
                 {

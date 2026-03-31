@@ -4,7 +4,11 @@ using System.Text.Json;
 
 namespace TheBookOfLong;
 
-internal static class ComplexRuntimePatchApplier
+/// <summary>
+/// 负责把单个 ComplexData 补丁真正写入到运行时控制器对象。
+/// 这里不处理时序、不处理等待，只关心“拿到目标对象后怎么改值”。
+/// </summary>
+internal static class ComplexPatchExecutor
 {
     internal static ComplexPatchApplyResult ApplyPatch(object controller, ComplexJsonPatchFile patchFile)
     {
