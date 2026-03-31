@@ -21,9 +21,10 @@ public sealed class MainMod : MelonMod
         ModProjectRegistry.Initialize();
         SymbolicFieldManager.Initialize();
         SymbolicFieldManager.Reset();
-        GameComplexDataPatchManager.Initialize();
-        GameComplexDataDumpManager.Initialize();
         DataModManager.Initialize();
+        GameComplexDataPatchManager.Initialize();
+        SymbolicFieldManager.WriteReport();
+        GameComplexDataDumpManager.Initialize();
 
         _harmony = new HarmonyLib.Harmony("TheBookOfLong.ConfigDump");
         _harmony.PatchAll(typeof(MainMod).Assembly);

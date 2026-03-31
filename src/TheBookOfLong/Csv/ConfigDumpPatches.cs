@@ -89,6 +89,8 @@ internal static class UnityTextAssetTextPatch
     private static void Postfix(global::UnityEngine.TextAsset __instance, ref string __result)
     {
         string originalText = __result;
+
+        // 注入点之前，先尽可能还原并落盘原始文本，保证 Dump 看到的是游戏最初读到的数据。
         string preferredText = ConfigDumpManager.ResolveBestTextAssetContent(__instance, originalText, out _);
         ConfigDumpManager.CaptureTextAssetRead(__instance, originalText);
 
@@ -97,6 +99,7 @@ internal static class UnityTextAssetTextPatch
             __result = preferredText;
         }
 
+        // Dump 完成后，CSV Mod 从这里开始接管返回给游戏的文本内容。
         DataModManager.TryApplyTextPatch(__instance, ref __result);
 
         if (!string.Equals(originalText, __result, StringComparison.Ordinal))

@@ -9,6 +9,11 @@ using System.Text.Json;
 
 namespace TheBookOfLong;
 
+/// <summary>
+/// 负责 CSV 文本导出流程。
+/// 这里既处理原始文本/表格的 Dump，也处理少量“底层仍走文本加载、但落盘格式更适合 json”的特殊导出。
+/// Dump 完成后，文本补丁会在同一条读取链路里继续注入，不需要再额外猜时机。
+/// </summary>
 internal static class ConfigDumpManager
 {
     private static readonly object Sync = new();
@@ -19,6 +24,7 @@ internal static class ConfigDumpManager
     private static readonly Dictionary<int, string> ResourcePathsByInstanceId = new();
     private static readonly Dictionary<string, Queue<PendingSource>> PendingSourcesByHash = new(StringComparer.Ordinal);
     private static readonly HashSet<int> ConsumedPendingSourceIds = new();
+    // 这些资源仍然走文本捕获链路，只是导出文件扩展名单独指定为 json，方便阅读和后续处理。
     private static readonly Dictionary<string, string> SpecialExportExtensionsBySourcePath = new(StringComparer.OrdinalIgnoreCase)
     {
         [Path.Combine("Data", "PoetryData")] = ".json"

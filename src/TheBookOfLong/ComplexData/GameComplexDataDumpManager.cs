@@ -33,16 +33,16 @@ internal static class GameComplexDataDumpManager
     private static string _gameRoot = string.Empty;
     private static string _dumpRoot = string.Empty;
     private static string _latestRoot = string.Empty;
+    private static int _exportCycleId;
     private static ExportState _exportState;
 
-    internal static bool IsExportCompleted
+    internal static bool IsExportCompleted(int cycleId)
     {
-        get
+        lock (Sync)
         {
-            lock (Sync)
-            {
-                return _exportState is ExportState.Completed or ExportState.Failed;
-            }
+            return cycleId > 0
+                && cycleId == _exportCycleId
+                && _exportState is ExportState.Completed or ExportState.Failed;
         }
     }
 
@@ -54,28 +54,38 @@ internal static class GameComplexDataDumpManager
         }
     }
 
-    internal static void TryStartExport()
+    internal static int StartNewExportCycle()
     {
+        int cycleId;
         lock (Sync)
         {
-            if (!EnsureInitialized() || _exportState != ExportState.NotStarted)
+            if (!EnsureInitialized())
             {
-                return;
+                _exportState = ExportState.Failed;
+                return 0;
             }
 
+            _exportCycleId += 1;
+            cycleId = _exportCycleId;
             _exportState = ExportState.WaitingForSceneData;
         }
 
-        MelonLoader.MelonCoroutines.Start(WaitAndExportComplexData());
+        MelonLoader.MelonCoroutines.Start(WaitAndExportComplexData(cycleId));
+        return cycleId;
     }
 
-    private static IEnumerator WaitAndExportComplexData()
+    private static IEnumerator WaitAndExportComplexData(int cycleId)
     {
         while (true)
         {
             ExportState exportState;
             lock (Sync)
             {
+                if (cycleId != _exportCycleId)
+                {
+                    yield break;
+                }
+
                 exportState = _exportState;
             }
 
@@ -89,7 +99,7 @@ internal static class GameComplexDataDumpManager
 
             if (IsComplexDataReady(worldPlotEventController, missionDataController))
             {
-                ExportComplexData(worldPlotEventController!, missionDataController!);
+                ExportComplexData(cycleId, worldPlotEventController!, missionDataController!);
                 yield break;
             }
 
@@ -125,12 +135,13 @@ internal static class GameComplexDataDumpManager
     }
 
     private static void ExportComplexData(
+        int cycleId,
         global::Il2Cpp.WorldPlotEventController worldPlotEventController,
         global::Il2Cpp.MissionDataController missionDataController)
     {
         lock (Sync)
         {
-            if (_exportState != ExportState.WaitingForSceneData)
+            if (cycleId != _exportCycleId || _exportState != ExportState.WaitingForSceneData)
             {
                 return;
             }
@@ -143,6 +154,11 @@ internal static class GameComplexDataDumpManager
             string complexDataRoot;
             lock (Sync)
             {
+                if (cycleId != _exportCycleId)
+                {
+                    return;
+                }
+
                 if (!EnsureInitialized())
                 {
                     _exportState = ExportState.Failed;
@@ -171,17 +187,23 @@ internal static class GameComplexDataDumpManager
 
             lock (Sync)
             {
-                _exportState = ExportState.Completed;
+                if (cycleId == _exportCycleId)
+                {
+                    _exportState = ExportState.Completed;
+                }
             }
 
             MelonLoader.MelonLogger.Msg(
-                $"Game complex data export complete. Wrote {exportedFileCount} files to {complexDataRoot}");
+                $"Game complex data export cycle {cycleId} complete. Wrote {exportedFileCount} files to {complexDataRoot}");
         }
         catch (Exception ex)
         {
             lock (Sync)
             {
-                _exportState = ExportState.Failed;
+                if (cycleId == _exportCycleId)
+                {
+                    _exportState = ExportState.Failed;
+                }
             }
 
             MelonLoader.MelonLogger.Warning($"Failed to export game complex data: {ex}");

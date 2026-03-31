@@ -7,13 +7,18 @@ namespace TheBookOfLong;
 
 internal static partial class GameComplexDataPatchManager
 {
-    private static IEnumerator WaitAndApplyPatches()
+    private static IEnumerator WaitAndApplyPatches(int applyCycleId, int dumpCycleId)
     {
         while (true)
         {
             ApplyState applyState;
             lock (Sync)
             {
+                if (applyCycleId != _applyCycleId || dumpCycleId != _waitingDumpCycleId)
+                {
+                    yield break;
+                }
+
                 applyState = _applyState;
             }
 
@@ -22,10 +27,10 @@ internal static partial class GameComplexDataPatchManager
                 yield break;
             }
 
-            if (GameComplexDataDumpManager.IsExportCompleted
+            if (GameComplexDataDumpManager.IsExportCompleted(dumpCycleId)
                 && IsPatchTargetsReady(out var worldPlotEventController, out var missionDataController))
             {
-                ApplyLoadedPatchFiles(worldPlotEventController!, missionDataController!);
+                ApplyLoadedPatchFiles(applyCycleId, dumpCycleId, worldPlotEventController!, missionDataController!);
                 yield break;
             }
 
@@ -60,12 +65,16 @@ internal static partial class GameComplexDataPatchManager
     }
 
     private static void ApplyLoadedPatchFiles(
+        int applyCycleId,
+        int dumpCycleId,
         global::Il2Cpp.WorldPlotEventController worldPlotEventController,
         global::Il2Cpp.MissionDataController missionDataController)
     {
         lock (Sync)
         {
-            if (_applyState != ApplyState.WaitingForSceneData)
+            if (applyCycleId != _applyCycleId
+                || dumpCycleId != _waitingDumpCycleId
+                || _applyState != ApplyState.WaitingForSceneData)
             {
                 return;
             }
@@ -120,14 +129,20 @@ internal static partial class GameComplexDataPatchManager
 
             lock (Sync)
             {
-                _applyState = ApplyState.Completed;
+                if (applyCycleId == _applyCycleId && dumpCycleId == _waitingDumpCycleId)
+                {
+                    _applyState = ApplyState.Completed;
+                }
             }
         }
         catch (Exception ex)
         {
             lock (Sync)
             {
-                _applyState = ApplyState.Failed;
+                if (applyCycleId == _applyCycleId && dumpCycleId == _waitingDumpCycleId)
+                {
+                    _applyState = ApplyState.Failed;
+                }
             }
 
             MelonLoader.MelonLogger.Warning($"Failed to apply game complex data patches: {ex}");

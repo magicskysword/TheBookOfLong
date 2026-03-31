@@ -248,31 +248,32 @@ TheBookOfLong
 ├─ TheBookOfLong.sln
 └─ src
    └─ TheBookOfLong
-      ├─ MainMod.cs
-      ├─ Dump
+      ├─ Csv
       │  ├─ ConfigDumpManager.cs
-      │  └─ ConfigDumpPatches.cs
+      │  ├─ ConfigDumpPatches.cs
+      │  ├─ DataModManager.cs
+      │  ├─ CsvPatchFile.cs
+      │  ├─ CsvUtility.cs
+      │  ├─ CsvPatchApplier.cs
+      │  └─ PlotDataPatchApplier.cs
+      ├─ ComplexData
+      │  ├─ GameComplexDataDumpManager.cs
+      │  ├─ GameComplexDataDumpPatches.cs
+      │  ├─ GameComplexDataPatchManager.cs
+      │  ├─ ComplexPatchModels.cs
+      │  ├─ ComplexTypeAccessor.cs
+      │  ├─ ComplexJsonValuePatcher.cs
+      │  └─ ComplexRuntimePatchApplier.cs
+      ├─ MainMod.cs
       ├─ Mods
       │  ├─ IModProject.cs
       │  ├─ ModProject.cs
       │  ├─ ModProjectRegistry.cs
       │  ├─ ModLoadConfigManager.cs
-      │  ├─ Csv
-      │  │  ├─ DataModManager.cs
-      │  │  ├─ CsvPatchFile.cs
-      │  │  ├─ CsvUtility.cs
-      │  │  ├─ CsvPatchApplier.cs
-      │  │  └─ PlotDataPatchApplier.cs
-      │  ├─ ComplexData
-      │  │  ├─ GameComplexDataDumpManager.cs
-      │  │  ├─ GameComplexDataPatchManager.cs
-      │  │  ├─ ComplexPatchModels.cs
-      │  │  ├─ ComplexTypeAccessor.cs
-      │  │  ├─ ComplexJsonValuePatcher.cs
-      │  │  └─ ComplexRuntimePatchApplier.cs
-      │  └─ Symbolic
-      │     ├─ SymbolicFieldManager.cs
-      │     └─ SymbolicIdService.cs
+      ├─ Symbolic
+      │  ├─ SymbolicFieldManager.cs
+      │  ├─ SymbolicIdService.cs
+      │  └─ SymbolicSourceResolution.cs
       └─ UI
          ├─ MelonPreferencesEditor.cs
          └─ ModSettings.cs
@@ -281,14 +282,22 @@ TheBookOfLong
 核心文件说明：
 
 - `MainMod.cs`：MelonLoader 入口，初始化导出、Mod 注册表和补丁系统，并注册 Harmony 补丁。
-- `Dump/ConfigDumpManager.cs`：负责配置导出、编码识别、命名和 `manifest.json` 生成。
-- `Dump/ConfigDumpPatches.cs`：负责挂接游戏加载流程与 Unity 资源读取流程。
+- `Csv/ConfigDumpManager.cs`：负责 CSV 文本导出、编码识别、命名和 `manifest.json` 生成，也处理少量走文本链路的特殊 json 导出。
+- `Csv/ConfigDumpPatches.cs`：负责挂接 CSV 文本加载流程，并在 Dump 完成后提供文本补丁注入点。
 - `ModProjectRegistry.cs`：负责扫描 `ModsOfLong` 并生成统一的 Mod 项目视图。
 - `ModLoadConfigManager.cs`：负责维护 `<游戏目录>\UserData\TheBookOfLong.ModLoadConfig.json`，决定 Mod 是否启用以及加载顺序。
-- `Mods/Csv/DataModManager.cs`：负责把已启用 Mod 的 CSV 补丁接入游戏文本资源。
-- `Mods/ComplexData/GameComplexDataPatchManager.cs`：负责把已启用 Mod 的复杂 JSON 补丁回写到场景内控制器对象。
-- `Mods/Symbolic/SymbolicIdService.cs`：负责统一分配 `modXXX` 符号 ID，并让 CSV 与 ComplexData 共享同一套映射。
+- `Csv/DataModManager.cs`：负责把已启用 Mod 的 CSV 补丁接入游戏文本资源。
+- `ComplexData/GameComplexDataDumpManager.cs`：负责在场景对象就绪后导出当前轮次的原始 ComplexData。
+- `ComplexData/GameComplexDataPatchManager.cs`：负责在 ComplexData Dump 完成后，把已启用 Mod 的复杂 JSON 补丁回写到当前场景控制器对象。
+- `Symbolic/SymbolicIdService.cs`：负责统一分配 `modXXX` 符号 ID，并以 CSV 主键定义为准，让其他引用位置共享同一套映射。
 - `UI/MelonPreferencesEditor.cs`：负责框架配置界面的编辑、展示与交互。
+
+### 运行流程
+
+1. CSV 文本链路会先 Dump 原始文本，再在同一条读取链路里注入 Mod 文本补丁。
+2. ComplexData 会在每次 `GameController.Start` 时重新开始一轮“等待对象就绪 -> Dump 原始运行时数据 -> 注入 JSON 补丁”的流程。
+3. CSV 的注入时机早于 ComplexData 的场景内注入时机。
+4. `modXXX` 符号 ID 以 CSV 主键中的定义和排序为准，ComplexData 等其他位置只负责引用已经定义好的主键。
 
 ## 当前状态
 

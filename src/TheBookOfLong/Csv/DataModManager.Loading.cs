@@ -40,6 +40,7 @@ internal static partial class DataModManager
 
             string relativePath = NormalizeLookupKey(Path.GetRelativePath(modProject.DataDirectory, patchFilePath));
             int keyColumnIndex = CsvUtility.ResolveKeyColumnIndex(rows[0]);
+            List<string> orderedPrimarySymbolicIds = SymbolicIdService.CollectOrderedPrimarySymbolicIds(rows, keyColumnIndex);
             csvPatchFile = new CsvPatchFile
             {
                 ModName = modProject.DisplayName,
@@ -48,7 +49,8 @@ internal static partial class DataModManager
                 SourcePath = SymbolicIdService.BuildCanonicalSourcePath(relativePath),
                 KeyColumnIndex = keyColumnIndex,
                 LoadOrder = ++_patchFileOrder,
-                SymbolicIds = SymbolicIdService.CollectSymbolicIds(rows, keyColumnIndex),
+                OrderedPrimarySymbolicIds = orderedPrimarySymbolicIds,
+                SymbolicIds = new HashSet<string>(orderedPrimarySymbolicIds, StringComparer.OrdinalIgnoreCase),
                 Rows = rows
             };
 
