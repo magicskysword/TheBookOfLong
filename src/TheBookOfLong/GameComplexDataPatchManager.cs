@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using System.Text.Json;
 
 namespace TheBookOfLong;
 
@@ -11,29 +10,28 @@ namespace TheBookOfLong;
 /// </summary>
 internal static partial class GameComplexDataPatchManager
 {
-    private const string PlotDataSourcePath = "GameData/PlotData.csv";
+    internal const string PlotDataSourcePath = "GameData/PlotData.csv";
 
     private static readonly object Sync = new();
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     // 这里定义了允许被复杂数据补丁接管的目标文件，以及它们映射到的控制器字段和合并策略。
-    private static readonly Dictionary<string, PatchTargetDefinition> TargetDefinitionsByFileName = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, ComplexPatchTargetDefinition> TargetDefinitionsByFileName = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["MissionDataController_bountyMissionDataBase.json"] = new PatchTargetDefinition(ControllerKind.MissionData, "bountyMissionDataBase", PatchTargetKind.ArrayByName),
-        ["MissionDataController_BranchMissionDataBase.json"] = new PatchTargetDefinition(ControllerKind.MissionData, "BranchMissionDataBase", PatchTargetKind.ArrayByName),
-        ["MissionDataController_LittleMissionDataBase.json"] = new PatchTargetDefinition(ControllerKind.MissionData, "LittleMissionDataBase", PatchTargetKind.ArrayByName),
-        ["MissionDataController_MainMissionDataBase.json"] = new PatchTargetDefinition(ControllerKind.MissionData, "MainMissionDataBase", PatchTargetKind.ArrayByName),
-        ["MissionDataController_SpeKillerMissionDataBase.json"] = new PatchTargetDefinition(ControllerKind.MissionData, "SpeKillerMissionDataBase", PatchTargetKind.ObjectReplace),
-        ["MissionDataController_TreasureMapMissionDataBase.json"] = new PatchTargetDefinition(ControllerKind.MissionData, "TreasureMapMissionDataBase", PatchTargetKind.ObjectReplace),
-        ["WorldPlotEventController_WorldPlotEventDataBase.json"] = new PatchTargetDefinition(ControllerKind.WorldPlotEvent, "WorldPlotEventDataBase", PatchTargetKind.ArrayByName)
+        ["MissionDataController_bountyMissionDataBase.json"] = new ComplexPatchTargetDefinition(ComplexControllerKind.MissionData, "bountyMissionDataBase", ComplexPatchTargetKind.ArrayByName),
+        ["MissionDataController_BranchMissionDataBase.json"] = new ComplexPatchTargetDefinition(ComplexControllerKind.MissionData, "BranchMissionDataBase", ComplexPatchTargetKind.ArrayByName),
+        ["MissionDataController_LittleMissionDataBase.json"] = new ComplexPatchTargetDefinition(ComplexControllerKind.MissionData, "LittleMissionDataBase", ComplexPatchTargetKind.ArrayByName),
+        ["MissionDataController_MainMissionDataBase.json"] = new ComplexPatchTargetDefinition(ComplexControllerKind.MissionData, "MainMissionDataBase", ComplexPatchTargetKind.ArrayByName),
+        ["MissionDataController_SpeKillerMissionDataBase.json"] = new ComplexPatchTargetDefinition(ComplexControllerKind.MissionData, "SpeKillerMissionDataBase", ComplexPatchTargetKind.ObjectReplace),
+        ["MissionDataController_TreasureMapMissionDataBase.json"] = new ComplexPatchTargetDefinition(ComplexControllerKind.MissionData, "TreasureMapMissionDataBase", ComplexPatchTargetKind.ObjectReplace),
+        ["WorldPlotEventController_WorldPlotEventDataBase.json"] = new ComplexPatchTargetDefinition(ComplexControllerKind.WorldPlotEvent, "WorldPlotEventDataBase", ComplexPatchTargetKind.ArrayByName)
     };
 
     // 先把文件解析并缓存起来，等场景内控制器就绪后再统一应用，避免过早触发 IL2CPP 空引用。
     private static readonly List<ComplexJsonPatchFile> LoadedPatchFiles = new();
 
-    private static string _modsOfLongRoot = string.Empty;
-
-    // 导出流程会依赖这个状态，确保复杂数据补丁先完成，再导出最终生效后的结果。
+    // 当前实际流程是先导出原始复杂数据，再等导出完成后应用补丁。
+    // 这个状态只负责协调补丁何时开始，不再让调用方自己猜时序。
     private static ApplyState _applyState;
     private static bool _isInitialized;
 
@@ -109,92 +107,4 @@ internal static partial class GameComplexDataPatchManager
         Failed
     }
 
-    private enum ControllerKind
-    {
-        MissionData,
-        WorldPlotEvent
-    }
-
-    private enum PatchTargetKind
-    {
-        ArrayByName,
-        ObjectReplace
-    }
-
-    private sealed class PatchTargetDefinition
-    {
-        internal PatchTargetDefinition(ControllerKind controllerKind, string memberName, PatchTargetKind patchTargetKind)
-        {
-            ControllerKind = controllerKind;
-            MemberName = memberName;
-            PatchTargetKind = patchTargetKind;
-        }
-
-        internal ControllerKind ControllerKind { get; }
-
-        internal string MemberName { get; }
-
-        internal PatchTargetKind PatchTargetKind { get; }
-    }
-
-    private sealed class ComplexJsonPatchFile
-    {
-        public string ModName { get; set; } = string.Empty;
-
-        public string FullPath { get; set; } = string.Empty;
-
-        public string RelativePath { get; set; } = string.Empty;
-
-        public int LoadOrder { get; set; }
-
-        public JsonElement RootElement { get; set; }
-
-        public PatchTargetDefinition Target { get; set; } = null!;
-    }
-
-    private sealed class PatchApplyResult
-    {
-        public string ModName { get; set; } = string.Empty;
-
-        public string RelativePath { get; set; } = string.Empty;
-
-        public PatchTargetKind PatchTargetKind { get; set; }
-
-        public int AddedCount { get; set; }
-
-        public int ModifiedCount { get; set; }
-
-        public int ReplacedCount { get; set; }
-    }
-
-    /// <summary>
-    /// 反射写入时统一缓存字段/属性元数据，避免在递归反序列化时到处散落反射分支判断。
-    /// </summary>
-    private sealed class PatchableMember
-    {
-        internal PatchableMember(
-            string name,
-            Type valueType,
-            Func<object, object?> getter,
-            Action<object, object?> setter)
-        {
-            Name = name;
-            ValueType = valueType;
-            Getter = getter;
-            Setter = setter;
-        }
-
-        internal string Name { get; }
-
-        internal Type ValueType { get; }
-
-        internal Func<object, object?> Getter { get; }
-
-        internal Action<object, object?> Setter { get; }
-    }
-
-    private sealed class DataModInfoFile
-    {
-        public string? Name { get; set; }
-    }
 }

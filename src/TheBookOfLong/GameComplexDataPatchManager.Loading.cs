@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -8,71 +9,22 @@ internal static partial class GameComplexDataPatchManager
 {
     private static bool EnsureInitialized()
     {
-        if (!string.IsNullOrWhiteSpace(_modsOfLongRoot))
-        {
-            return true;
-        }
-
-        string? modsRoot = null;
-        try
-        {
-            modsRoot = MelonLoader.Utils.MelonEnvironment.ModsDirectory;
-        }
-        catch
-        {
-        }
-
-        if (string.IsNullOrWhiteSpace(modsRoot))
-        {
-            try
-            {
-                string gameRoot = MelonLoader.Utils.MelonEnvironment.GameRootDirectory;
-                if (!string.IsNullOrWhiteSpace(gameRoot))
-                {
-                    modsRoot = Path.Combine(gameRoot, "Mods");
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(modsRoot))
-        {
-            MelonLoader.MelonLogger.Warning("Game complex data mods path is unavailable. Could not resolve Mods directory.");
-            return false;
-        }
-
-        _modsOfLongRoot = Path.Combine(Path.GetFullPath(modsRoot), "ModsOfLong");
-        Directory.CreateDirectory(_modsOfLongRoot);
-        return true;
+        return ModProjectRegistry.Initialize();
     }
 
     private static void LoadPatchFiles()
     {
         LoadedPatchFiles.Clear();
 
-        string[] modDirectories = Directory.GetDirectories(_modsOfLongRoot, "mod*", SearchOption.TopDirectoryOnly);
-        Array.Sort(modDirectories, StringComparer.OrdinalIgnoreCase);
-
+        IReadOnlyList<IModProject> modProjects = ModProjectRegistry.GetEnabledProjectsSnapshot();
         int loadOrder = 0;
-        for (int modIndex = 0; modIndex < modDirectories.Length; modIndex += 1)
+        for (int modIndex = 0; modIndex < modProjects.Count; modIndex += 1)
         {
-            string modDirectory = modDirectories[modIndex];
-            string modName = ResolveDataModDisplayName(modDirectory);
-            string complexDataDirectory = Path.Combine(modDirectory, "ComplexData");
-            if (!Directory.Exists(complexDataDirectory))
+            IModProject modProject = modProjects[modIndex];
+            for (int patchIndex = 0; patchIndex < modProject.ComplexDataPatchFiles.Count; patchIndex += 1)
             {
-                continue;
-            }
-
-            string[] patchFiles = Directory.GetFiles(complexDataDirectory, "*.json", SearchOption.AllDirectories);
-            Array.Sort(patchFiles, StringComparer.OrdinalIgnoreCase);
-
-            for (int patchIndex = 0; patchIndex < patchFiles.Length; patchIndex += 1)
-            {
-                string patchFilePath = patchFiles[patchIndex];
-                if (TryLoadPatchFile(modName, complexDataDirectory, patchFilePath, ++loadOrder, out ComplexJsonPatchFile? patchFile))
+                string patchFilePath = modProject.ComplexDataPatchFiles[patchIndex];
+                if (TryLoadPatchFile(modProject, patchFilePath, ++loadOrder, out ComplexJsonPatchFile? patchFile))
                 {
                     LoadedPatchFiles.Add(patchFile!);
                 }
@@ -82,24 +34,23 @@ internal static partial class GameComplexDataPatchManager
         if (LoadedPatchFiles.Count > 0)
         {
             MelonLoader.MelonLogger.Msg(
-                $"Game complex data patches ready: '{_modsOfLongRoot}'. Loaded {LoadedPatchFiles.Count} JSON patch file(s).");
+                $"Game complex data patches ready: '{ModProjectRegistry.ModsOfLongRoot}'. Loaded {LoadedPatchFiles.Count} JSON patch file(s) from {modProjects.Count} enabled mod(s).");
         }
     }
 
     private static bool TryLoadPatchFile(
-        string modName,
-        string complexDataDirectory,
+        IModProject modProject,
         string patchFilePath,
         int loadOrder,
         out ComplexJsonPatchFile? patchFile)
     {
         patchFile = null;
 
-        string relativePath = NormalizeLookupKey(Path.GetRelativePath(complexDataDirectory, patchFilePath));
+        string relativePath = NormalizeLookupKey(Path.GetRelativePath(modProject.ComplexDataDirectory, patchFilePath));
         string canonicalRelativePath = BuildCanonicalComplexDataPath(relativePath);
         string fileName = Path.GetFileName(canonicalRelativePath);
 
-        if (!TargetDefinitionsByFileName.TryGetValue(fileName, out PatchTargetDefinition? targetDefinition))
+        if (!TargetDefinitionsByFileName.TryGetValue(fileName, out ComplexPatchTargetDefinition? targetDefinition))
         {
             return false;
         }
@@ -110,13 +61,13 @@ internal static partial class GameComplexDataPatchManager
             using JsonDocument document = JsonDocument.Parse(json);
             JsonElement rootElement = document.RootElement.Clone();
 
-            if (targetDefinition.PatchTargetKind == PatchTargetKind.ArrayByName && rootElement.ValueKind != JsonValueKind.Array)
+            if (targetDefinition.PatchTargetKind == ComplexPatchTargetKind.ArrayByName && rootElement.ValueKind != JsonValueKind.Array)
             {
                 MelonLoader.MelonLogger.Warning($"Skipped complex data patch '{patchFilePath}' because the root JSON value is not an array.");
                 return false;
             }
 
-            if (targetDefinition.PatchTargetKind == PatchTargetKind.ObjectReplace && rootElement.ValueKind != JsonValueKind.Object)
+            if (targetDefinition.PatchTargetKind == ComplexPatchTargetKind.ObjectReplace && rootElement.ValueKind != JsonValueKind.Object)
             {
                 MelonLoader.MelonLogger.Warning($"Skipped complex data patch '{patchFilePath}' because the root JSON value is not an object.");
                 return false;
@@ -124,7 +75,7 @@ internal static partial class GameComplexDataPatchManager
 
             patchFile = new ComplexJsonPatchFile
             {
-                ModName = modName,
+                ModName = modProject.DisplayName,
                 FullPath = patchFilePath,
                 RelativePath = canonicalRelativePath,
                 LoadOrder = loadOrder,
@@ -133,6 +84,8 @@ internal static partial class GameComplexDataPatchManager
             };
 
             RegisterSymbolicPlotIdReferences(patchFile);
+            MelonLoader.MelonLogger.Msg(
+                $"Loaded complex data patch '{modProject.DisplayName}' (v{modProject.Version}, order {modProject.LoadOrder}): '{patchFile.RelativePath}'");
             return true;
         }
         catch (Exception ex)
@@ -161,7 +114,7 @@ internal static partial class GameComplexDataPatchManager
                         string rawValue = property.Value.GetString()?.Trim() ?? string.Empty;
                         if (rawValue.Length > 3 && rawValue.StartsWith("mod", StringComparison.OrdinalIgnoreCase))
                         {
-                            DataModManager.RegisterExternalSymbolicReference(
+                            SymbolicIdService.RegisterExternalReference(
                                 PlotDataSourcePath,
                                 rawValue,
                                 patchFile.ModName,
@@ -185,40 +138,6 @@ internal static partial class GameComplexDataPatchManager
 
                 break;
         }
-    }
-
-    private static string ResolveDataModDisplayName(string modDirectory)
-    {
-        string folderName = Path.GetFileName(modDirectory);
-        string infoFilePath = Path.Combine(modDirectory, "Info.json");
-        if (File.Exists(infoFilePath))
-        {
-            try
-            {
-                string json = File.ReadAllText(infoFilePath, Utf8NoBom);
-                DataModInfoFile? info = JsonSerializer.Deserialize<DataModInfoFile>(
-                    json,
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
-
-                if (!string.IsNullOrWhiteSpace(info?.Name))
-                {
-                    return info.Name.Trim();
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLoader.MelonLogger.Warning($"Failed to read complex data mod info '{infoFilePath}': {ex.Message}");
-            }
-        }
-
-        string fallbackName = folderName.StartsWith("mod", StringComparison.OrdinalIgnoreCase)
-            ? folderName.Substring(3).TrimStart(' ', '_', '-')
-            : folderName;
-
-        return string.IsNullOrWhiteSpace(fallbackName) ? folderName : fallbackName;
     }
 
     private static string BuildCanonicalComplexDataPath(string path)

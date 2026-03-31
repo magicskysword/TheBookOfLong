@@ -70,11 +70,54 @@ Mods
 
 ```json
 {
-  "Name": "我的第一个数据 Mod"
+  "Name": "我的第一个数据 Mod",
+  "Version": "1.0.0"
 }
 ```
 
-如果没有 `Info.json`，则默认使用文件夹名去掉 `mod` 前缀后的内容作为显示名。
+字段说明：
+
+1. `Name`：显示名。
+2. `Version`：版本号，仅用于展示和日志。
+
+如果没有 `Info.json`：
+
+1. 名称默认使用文件夹名去掉 `mod` 前缀后的内容。
+2. 版本号默认显示为 `unspecified`。
+
+### Mod 加载配置
+
+Mod 是否启用、以及多个 Mod 的加载顺序，不再由各自的 `Info.json` 决定，而是由龙之书框架统一维护。
+
+配置文件位置：
+
+```text
+<游戏目录>\UserData\TheBookOfLong.ModLoadConfig.json
+```
+
+示例：
+
+```json
+{
+  "FormatVersion": 1,
+  "Description": "修改本文件后，需要完全重启游戏才能应用新的 Mod 加载配置。Mods 数组中的顺序就是加载顺序，越靠后覆盖能力越强。",
+  "Mods": [
+    {
+      "FolderName": "modMyFirstMod",
+      "DisplayName": "我的第一个数据 Mod",
+      "Version": "1.0.0",
+      "Enabled": true
+    }
+  ]
+}
+```
+
+规则说明：
+
+1. `Mods` 数组中的顺序就是加载顺序。
+2. 越靠后的 Mod 越晚加载，因此覆盖能力越强。
+3. `Enabled` 由框架读取，用来决定该 Mod 是否参与当前启动流程。
+4. 修改这个文件后，玩家需要完全重启游戏，新的加载配置才会生效。
 
 ### CSV 补丁规则
 
@@ -208,15 +251,36 @@ TheBookOfLong
       ├─ MainMod.cs
       ├─ ConfigDumpManager.cs
       ├─ ConfigDumpPatches.cs
-      └─ DataModManager.cs
+      ├─ DataModManager.cs
+      ├─ GameComplexDataPatchManager.cs
+      ├─ GameComplexDataDumpManager.cs
+      ├─ CsvPatchFile.cs
+      └─ Mods
+         ├─ ModProjectRegistry.cs
+         ├─ ModLoadConfigManager.cs
+         ├─ Csv
+         │  ├─ CsvUtility.cs
+         │  ├─ CsvPatchApplier.cs
+         │  └─ PlotDataPatchApplier.cs
+         ├─ ComplexData
+         │  ├─ ComplexPatchModels.cs
+         │  ├─ ComplexTypeAccessor.cs
+         │  ├─ ComplexJsonValuePatcher.cs
+         │  └─ ComplexRuntimePatchApplier.cs
+         └─ Symbolic
+            └─ SymbolicIdService.cs
 ```
 
 核心文件说明：
 
-- `MainMod.cs`：MelonLoader 入口，初始化导出管理器、数据 Mod 管理器，并注册 Harmony 补丁。
+- `MainMod.cs`：MelonLoader 入口，初始化导出、Mod 注册表和补丁系统，并注册 Harmony 补丁。
 - `ConfigDumpManager.cs`：负责配置导出、编码识别、命名和 `manifest.json` 生成。
 - `ConfigDumpPatches.cs`：负责挂接游戏加载流程与 Unity 资源读取流程。
-- `DataModManager.cs`：负责扫描 `ModsOfLong`、加载 CSV 补丁、字符串 ID 映射与合并回写。
+- `ModProjectRegistry.cs`：负责扫描 `ModsOfLong` 并生成统一的 Mod 项目视图。
+- `ModLoadConfigManager.cs`：负责维护 `<游戏目录>\UserData\TheBookOfLong.ModLoadConfig.json`，决定 Mod 是否启用以及加载顺序。
+- `DataModManager.cs`：负责把已启用 Mod 的 CSV 补丁接入游戏文本资源。
+- `GameComplexDataPatchManager.cs`：负责把已启用 Mod 的复杂 JSON 补丁回写到场景内控制器对象。
+- `SymbolicIdService.cs`：负责统一分配 `modXXX` 符号 ID，并让 CSV 与 ComplexData 共享同一套映射。
 
 ## 当前状态
 

@@ -1,84 +1,123 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using MelonLoader;
 
 namespace TheBookOfLong;
 
-internal static partial class DataModManager
+/// <summary>
+/// 负责管理 modXXX 这类符号 ID。
+/// CSV 与 ComplexData 都通过这里共享分配结果，避免多个系统各自维护状态。
+/// </summary>
+internal static class SymbolicIdService
 {
-    private static void PrepareCsvPatches(List<CsvPatchFile> csvPatchFiles)
+    private static readonly object Sync = new();
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+    private static readonly Dictionary<string, SymbolicSourceInfo> SymbolicSourcesBySourcePath = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, SymbolicIdGroup> SymbolicGroupsBySourcePath = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, HashSet<string>> ExternalSymbolicIdsBySourcePath = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string _gameRoot = string.Empty;
+
+    internal static void Reset(string gameRoot)
     {
-        Dictionary<string, SymbolicSourceInfo> symbolicSources = new(StringComparer.OrdinalIgnoreCase);
-
-        for (int i = 0; i < csvPatchFiles.Count; i += 1)
+        lock (Sync)
         {
-            CsvPatchFile patchFile = csvPatchFiles[i];
-            if (patchFile.SymbolicIds.Count == 0)
-            {
-                continue;
-            }
-
-            if (!symbolicSources.TryGetValue(patchFile.SourcePath, out SymbolicSourceInfo? sourceInfo))
-            {
-                sourceInfo = new SymbolicSourceInfo
-                {
-                    SourcePath = patchFile.SourcePath,
-                    KeyColumnIndex = patchFile.KeyColumnIndex
-                };
-
-                symbolicSources[sourceInfo.SourcePath] = sourceInfo;
-            }
-            else if (sourceInfo.KeyColumnIndex != patchFile.KeyColumnIndex)
-            {
-                MelonLogger.Warning(
-                    $"Data patch '{patchFile.FullPath}' uses key column {patchFile.KeyColumnIndex}, but other patches for '{patchFile.SourcePath}' use key column {sourceInfo.KeyColumnIndex}. The first detected key column will be used for string ID resolution.");
-            }
-
-            sourceInfo.SymbolicIds.UnionWith(patchFile.SymbolicIds);
+            _gameRoot = gameRoot;
+            SymbolicSourcesBySourcePath.Clear();
+            SymbolicGroupsBySourcePath.Clear();
+            ExternalSymbolicIdsBySourcePath.Clear();
         }
+    }
 
-        MergeExternalSymbolicSources(symbolicSources);
-
-        if (symbolicSources.Count == 0)
+    internal static void RegisterExternalReference(
+        string sourcePath,
+        string symbolicValue,
+        string modName,
+        string filePath,
+        string location)
+    {
+        if (!TryGetSymbolicId(symbolicValue, out string symbolicId))
         {
-            PublishExternalSymbolicSources();
             return;
         }
 
-        foreach (SymbolicSourceInfo sourceInfo in symbolicSources.Values)
+        string canonicalSourcePath = BuildCanonicalSourcePath(sourcePath);
+        lock (Sync)
         {
-            if (TryGetBaseMaxId(sourceInfo.SourcePath, sourceInfo.KeyColumnIndex, out int baseMaxId, out string? warning))
+            if (!ExternalSymbolicIdsBySourcePath.TryGetValue(canonicalSourcePath, out HashSet<string>? symbolicIds))
             {
-                sourceInfo.HasBaseMaxId = true;
-                sourceInfo.BaseMaxId = baseMaxId;
+                symbolicIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                ExternalSymbolicIdsBySourcePath[canonicalSourcePath] = symbolicIds;
             }
-            else if (!string.IsNullOrWhiteSpace(warning))
-            {
-                MelonLogger.Warning(warning);
-            }
+
+            symbolicIds.Add(symbolicId);
         }
 
-        List<SymbolicIdGroup> groups = BuildSymbolicIdGroups(symbolicSources);
-        for (int i = 0; i < groups.Count; i += 1)
-        {
-            ResolveSymbolicIdGroup(groups[i], symbolicSources);
-        }
-
-        foreach ((string sourcePath, SymbolicSourceInfo sourceInfo) in symbolicSources)
-        {
-            SymbolicSourcesBySourcePath[sourcePath] = sourceInfo;
-        }
-
-        for (int i = 0; i < csvPatchFiles.Count; i += 1)
-        {
-            ApplyResolvedSymbolicIds(csvPatchFiles[i]);
-        }
-
-        PublishResolvedSymbolicSources(symbolicSources, groups);
+        SymbolicFieldManager.RegisterReference(
+            canonicalSourcePath,
+            symbolicId,
+            modName,
+            filePath,
+            location,
+            "json-plotID");
     }
 
-    private static void RegisterCsvSymbolicReferences(CsvPatchFile patchFile)
+    internal static bool TryResolveIdForSource(string sourcePath, string symbolicValue, out int assignedId)
+    {
+        assignedId = 0;
+        if (!TryGetSymbolicId(symbolicValue, out string symbolicId))
+        {
+            return false;
+        }
+
+        string canonicalSourcePath = BuildCanonicalSourcePath(sourcePath);
+        lock (Sync)
+        {
+            return SymbolicGroupsBySourcePath.TryGetValue(canonicalSourcePath, out SymbolicIdGroup? group)
+                   && group.AssignedIds.TryGetValue(symbolicId, out assignedId);
+        }
+    }
+
+    internal static bool TryGetSourceResolution(string sourcePath, out SymbolicSourceResolution resolution)
+    {
+        string canonicalSourcePath = BuildCanonicalSourcePath(sourcePath);
+        lock (Sync)
+        {
+            if (SymbolicSourcesBySourcePath.TryGetValue(canonicalSourcePath, out SymbolicSourceInfo? sourceInfo)
+                && SymbolicGroupsBySourcePath.TryGetValue(canonicalSourcePath, out SymbolicIdGroup? group))
+            {
+                resolution = new SymbolicSourceResolution(sourceInfo.HasBaseMaxId, sourceInfo.BaseMaxId, group.MaxAssignedId);
+                return true;
+            }
+        }
+
+        resolution = default;
+        return false;
+    }
+
+    internal static HashSet<string> CollectSymbolicIds(List<List<string>> rows, int keyColumnIndex)
+    {
+        HashSet<string> symbolicIds = new(StringComparer.OrdinalIgnoreCase);
+        if (keyColumnIndex < 0)
+        {
+            return symbolicIds;
+        }
+
+        for (int i = 1; i < rows.Count; i += 1)
+        {
+            string key = CsvUtility.GetCell(rows[i], keyColumnIndex);
+            if (TryGetSymbolicId(key, out string symbolicId))
+            {
+                symbolicIds.Add(symbolicId);
+            }
+        }
+
+        return symbolicIds;
+    }
+
+    internal static void RegisterCsvReferences(CsvPatchFile patchFile)
     {
         if (patchFile.KeyColumnIndex < 0)
         {
@@ -87,7 +126,7 @@ internal static partial class DataModManager
 
         for (int rowIndex = 1; rowIndex < patchFile.Rows.Count; rowIndex += 1)
         {
-            string key = GetCell(patchFile.Rows[rowIndex], patchFile.KeyColumnIndex);
+            string key = CsvUtility.GetCell(patchFile.Rows[rowIndex], patchFile.KeyColumnIndex);
             if (!TryGetSymbolicId(key, out string symbolicId))
             {
                 continue;
@@ -101,6 +140,114 @@ internal static partial class DataModManager
                 $"row {rowIndex + 1}",
                 "csv-key");
         }
+    }
+
+    internal static void PrepareCsvPatches(List<CsvPatchFile> csvPatchFiles)
+    {
+        lock (Sync)
+        {
+            Dictionary<string, SymbolicSourceInfo> symbolicSources = new(StringComparer.OrdinalIgnoreCase);
+
+            for (int i = 0; i < csvPatchFiles.Count; i += 1)
+            {
+                CsvPatchFile patchFile = csvPatchFiles[i];
+                if (patchFile.SymbolicIds.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!symbolicSources.TryGetValue(patchFile.SourcePath, out SymbolicSourceInfo? sourceInfo))
+                {
+                    sourceInfo = new SymbolicSourceInfo
+                    {
+                        SourcePath = patchFile.SourcePath,
+                        KeyColumnIndex = patchFile.KeyColumnIndex
+                    };
+
+                    symbolicSources[sourceInfo.SourcePath] = sourceInfo;
+                }
+                else if (sourceInfo.KeyColumnIndex != patchFile.KeyColumnIndex)
+                {
+                    MelonLogger.Warning(
+                        $"Data patch '{patchFile.FullPath}' uses key column {patchFile.KeyColumnIndex}, but other patches for '{patchFile.SourcePath}' use key column {sourceInfo.KeyColumnIndex}. The first detected key column will be used for string ID resolution.");
+                }
+
+                sourceInfo.SymbolicIds.UnionWith(patchFile.SymbolicIds);
+            }
+
+            MergeExternalSymbolicSources(symbolicSources);
+
+            if (symbolicSources.Count == 0)
+            {
+                PublishExternalSymbolicSources();
+                return;
+            }
+
+            foreach (SymbolicSourceInfo sourceInfo in symbolicSources.Values)
+            {
+                if (TryGetBaseMaxId(sourceInfo.SourcePath, sourceInfo.KeyColumnIndex, out int baseMaxId, out string? warning))
+                {
+                    sourceInfo.HasBaseMaxId = true;
+                    sourceInfo.BaseMaxId = baseMaxId;
+                }
+                else if (!string.IsNullOrWhiteSpace(warning))
+                {
+                    MelonLogger.Warning(warning);
+                }
+            }
+
+            List<SymbolicIdGroup> groups = BuildSymbolicIdGroups(symbolicSources);
+            for (int i = 0; i < groups.Count; i += 1)
+            {
+                ResolveSymbolicIdGroup(groups[i], symbolicSources);
+            }
+
+            foreach ((string sourcePath, SymbolicSourceInfo sourceInfo) in symbolicSources)
+            {
+                SymbolicSourcesBySourcePath[sourcePath] = sourceInfo;
+            }
+
+            for (int i = 0; i < csvPatchFiles.Count; i += 1)
+            {
+                ApplyResolvedSymbolicIds(csvPatchFiles[i]);
+            }
+
+            PublishResolvedSymbolicSources(symbolicSources, groups);
+        }
+    }
+
+    internal static bool TryGetSymbolicId(string? value, out string symbolicId)
+    {
+        string trimmed = value?.Trim() ?? string.Empty;
+        if (trimmed.Length > 3 && trimmed.StartsWith("mod", StringComparison.OrdinalIgnoreCase))
+        {
+            symbolicId = trimmed;
+            return true;
+        }
+
+        symbolicId = string.Empty;
+        return false;
+    }
+
+    internal static string BuildCanonicalSourcePath(string path)
+    {
+        string normalizedPath = NormalizePath(path);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return string.Empty;
+        }
+
+        string withExtension = string.IsNullOrEmpty(Path.GetExtension(normalizedPath))
+            ? normalizedPath + ".csv"
+            : normalizedPath;
+
+        string gameDataPrefix = "GameData" + Path.DirectorySeparatorChar;
+        if (!withExtension.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            withExtension = Path.Combine("GameData", withExtension);
+        }
+
+        return NormalizePath(withExtension);
     }
 
     private static void MergeExternalSymbolicSources(Dictionary<string, SymbolicSourceInfo> symbolicSources)
@@ -297,61 +444,11 @@ internal static partial class DataModManager
         patchFile.Rows = resolvedRows;
     }
 
-    private static HashSet<string> CollectSymbolicIds(List<List<string>> rows, int keyColumnIndex)
-    {
-        HashSet<string> symbolicIds = new(StringComparer.OrdinalIgnoreCase);
-        if (keyColumnIndex < 0)
-        {
-            return symbolicIds;
-        }
-
-        for (int i = 1; i < rows.Count; i += 1)
-        {
-            string key = GetCell(rows[i], keyColumnIndex);
-            if (TryGetSymbolicId(key, out string symbolicId))
-            {
-                symbolicIds.Add(symbolicId);
-            }
-        }
-
-        return symbolicIds;
-    }
-
-    private static bool TryGetSymbolicId(string? value, out string symbolicId)
-    {
-        string trimmed = value?.Trim() ?? string.Empty;
-        if (trimmed.Length > 3 && trimmed.StartsWith("mod", StringComparison.OrdinalIgnoreCase))
-        {
-            symbolicId = trimmed;
-            return true;
-        }
-
-        symbolicId = string.Empty;
-        return false;
-    }
-
-    private static string BuildCanonicalSourcePath(string path)
-    {
-        string normalizedPath = NormalizeLookupKey(path);
-        if (string.IsNullOrWhiteSpace(normalizedPath))
-        {
-            return string.Empty;
-        }
-
-        string withExtension = string.IsNullOrEmpty(Path.GetExtension(normalizedPath))
-            ? normalizedPath + ".csv"
-            : normalizedPath;
-
-        string gameDataPrefix = "GameData" + Path.DirectorySeparatorChar;
-        if (!withExtension.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            withExtension = Path.Combine("GameData", withExtension);
-        }
-
-        return NormalizeLookupKey(withExtension);
-    }
-
-    private static bool TryGetBaseMaxId(string sourcePath, int fallbackKeyColumnIndex, out int baseMaxId, out string? warning)
+    private static bool TryGetBaseMaxId(
+        string sourcePath,
+        int fallbackKeyColumnIndex,
+        out int baseMaxId,
+        out string? warning)
     {
         baseMaxId = 0;
         warning = null;
@@ -366,14 +463,14 @@ internal static partial class DataModManager
         try
         {
             string content = File.ReadAllText(latestDumpPath, Utf8NoBom);
-            List<List<string>> rows = ParseCsv(content);
+            List<List<string>> rows = CsvUtility.Parse(content);
             if (rows.Count == 0)
             {
                 baseMaxId = 0;
                 return true;
             }
 
-            int keyColumnIndex = ResolveKeyColumnIndex(rows[0]);
+            int keyColumnIndex = CsvUtility.ResolveKeyColumnIndex(rows[0]);
             if (keyColumnIndex < 0)
             {
                 keyColumnIndex = fallbackKeyColumnIndex;
@@ -384,7 +481,7 @@ internal static partial class DataModManager
 
             for (int i = 1; i < rows.Count; i += 1)
             {
-                string key = GetCell(rows[i], keyColumnIndex);
+                string key = CsvUtility.GetCell(rows[i], keyColumnIndex);
                 if (!int.TryParse(key, out int numericId))
                 {
                     continue;
@@ -409,7 +506,7 @@ internal static partial class DataModManager
 
     private static string GetLatestDumpPath(string sourcePath)
     {
-        string normalizedSourcePath = NormalizeLookupKey(sourcePath);
+        string normalizedSourcePath = NormalizePath(sourcePath);
         string gameDataPrefix = "GameData" + Path.DirectorySeparatorChar;
         if (normalizedSourcePath.StartsWith(gameDataPrefix, StringComparison.OrdinalIgnoreCase))
         {
@@ -423,8 +520,41 @@ internal static partial class DataModManager
         return Path.Combine(_gameRoot, "DataDump", "Latest", normalizedSourcePath);
     }
 
+    private static string NormalizePath(string path)
+    {
+        string normalized = path.Replace('\\', '/').TrimStart('/');
+        string[] segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(Path.DirectorySeparatorChar, segments);
+    }
+
     private static string FormatSourcePathList(IEnumerable<string> sourcePaths)
     {
         return string.Join(", ", sourcePaths);
+    }
+
+    private sealed class SymbolicSourceInfo
+    {
+        public string SourcePath { get; set; } = string.Empty;
+
+        public int KeyColumnIndex { get; set; } = -1;
+
+        public bool HasBaseMaxId { get; set; }
+
+        public int BaseMaxId { get; set; }
+
+        public HashSet<string> SymbolicIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class SymbolicIdGroup
+    {
+        public HashSet<string> SourcePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public HashSet<string> SymbolicIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public List<string> OrderedSymbolicIds { get; set; } = new();
+
+        public Dictionary<string, int> AssignedIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public int MaxAssignedId { get; set; }
     }
 }

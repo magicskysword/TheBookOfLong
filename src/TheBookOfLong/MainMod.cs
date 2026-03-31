@@ -18,6 +18,7 @@ public sealed class MainMod : MelonMod
     {
         ModSettings.Initialize();
         ConfigDumpManager.Initialize();
+        ModProjectRegistry.Initialize();
         SymbolicFieldManager.Initialize();
         SymbolicFieldManager.Reset();
         GameComplexDataPatchManager.Initialize();
@@ -33,7 +34,7 @@ public sealed class MainMod : MelonMod
             _autoOpenAtUtc = DateTime.UtcNow.AddSeconds(ModSettings.GetAutoOpenDelaySeconds());
         }
 
-        MelonLogger.Msg($"TheBookOfLong loaded. Config dump root: {ConfigDumpManager.DumpRoot}. Data mods root: {DataModManager.ModsOfLongRoot}");
+        MelonLogger.Msg($"TheBookOfLong loaded. Config dump root: {ConfigDumpManager.DumpRoot}. Data mods root: {ModProjectRegistry.ModsOfLongRoot}");
     }
 
     public override void OnUpdate()

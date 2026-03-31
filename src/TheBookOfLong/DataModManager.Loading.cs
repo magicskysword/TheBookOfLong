@@ -1,109 +1,60 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
 using MelonLoader;
 
 namespace TheBookOfLong;
 
 internal static partial class DataModManager
 {
-    private static DataModDefinition LoadDataMod(string modDirectory, List<CsvPatchFile> csvPatchFiles)
+    private static int LoadDataMod(IModProject modProject, List<CsvPatchFile> csvPatchFiles)
     {
-        string folderName = Path.GetFileName(modDirectory);
-        string displayName = ResolveDataModDisplayName(modDirectory, folderName);
-        string dataDirectory = Path.Combine(modDirectory, "Data");
         int patchFileCount = 0;
 
-        if (Directory.Exists(dataDirectory))
+        for (int i = 0; i < modProject.CsvPatchFiles.Count; i += 1)
         {
-            string[] patchFiles = Directory.GetFiles(dataDirectory, "*.csv", SearchOption.AllDirectories);
-            Array.Sort(patchFiles, StringComparer.OrdinalIgnoreCase);
-
-            foreach (string patchFilePath in patchFiles)
+            string patchFilePath = modProject.CsvPatchFiles[i];
+            if (TryLoadCsvPatchFile(modProject, patchFilePath, out CsvPatchFile? csvPatchFile))
             {
-                if (TryLoadCsvPatchFile(displayName, dataDirectory, patchFilePath, out CsvPatchFile? csvPatchFile))
-                {
-                    csvPatchFiles.Add(csvPatchFile!);
-                    patchFileCount += 1;
-                }
+                csvPatchFiles.Add(csvPatchFile!);
+                patchFileCount += 1;
             }
         }
 
-        return new DataModDefinition
-        {
-            FolderName = folderName,
-            DisplayName = displayName,
-            ModDirectory = modDirectory,
-            DataDirectory = dataDirectory,
-            PatchFileCount = patchFileCount
-        };
+        return patchFileCount;
     }
 
-    private static string ResolveDataModDisplayName(string modDirectory, string folderName)
-    {
-        string infoFilePath = Path.Combine(modDirectory, "Info.json");
-        if (File.Exists(infoFilePath))
-        {
-            try
-            {
-                string json = File.ReadAllText(infoFilePath, Utf8NoBom);
-                DataModInfoFile? info = JsonSerializer.Deserialize<DataModInfoFile>(
-                    json,
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
-
-                if (!string.IsNullOrWhiteSpace(info?.Name))
-                {
-                    return info.Name.Trim();
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"Failed to read data mod info '{infoFilePath}': {ex.Message}");
-            }
-        }
-
-        string fallbackName = folderName.StartsWith("mod", StringComparison.OrdinalIgnoreCase)
-            ? folderName.Substring(3).TrimStart(' ', '_', '-')
-            : folderName;
-
-        return string.IsNullOrWhiteSpace(fallbackName) ? folderName : fallbackName;
-    }
-
-    private static bool TryLoadCsvPatchFile(string modName, string dataDirectory, string patchFilePath, out CsvPatchFile? csvPatchFile)
+    private static bool TryLoadCsvPatchFile(IModProject modProject, string patchFilePath, out CsvPatchFile? csvPatchFile)
     {
         csvPatchFile = null;
 
         try
         {
             string content = File.ReadAllText(patchFilePath, Utf8NoBom);
-            List<List<string>> rows = ParseCsv(content);
+            List<List<string>> rows = CsvUtility.Parse(content);
             if (rows.Count == 0)
             {
                 MelonLogger.Warning($"Skipped empty data patch file '{patchFilePath}'.");
                 return false;
             }
 
-            string relativePath = NormalizeLookupKey(Path.GetRelativePath(dataDirectory, patchFilePath));
-            int keyColumnIndex = ResolveKeyColumnIndex(rows[0]);
+            string relativePath = NormalizeLookupKey(Path.GetRelativePath(modProject.DataDirectory, patchFilePath));
+            int keyColumnIndex = CsvUtility.ResolveKeyColumnIndex(rows[0]);
             csvPatchFile = new CsvPatchFile
             {
-                ModName = modName,
+                ModName = modProject.DisplayName,
                 FullPath = patchFilePath,
                 RelativePath = relativePath,
-                SourcePath = BuildCanonicalSourcePath(relativePath),
+                SourcePath = SymbolicIdService.BuildCanonicalSourcePath(relativePath),
                 KeyColumnIndex = keyColumnIndex,
                 LoadOrder = ++_patchFileOrder,
-                SymbolicIds = CollectSymbolicIds(rows, keyColumnIndex),
+                SymbolicIds = SymbolicIdService.CollectSymbolicIds(rows, keyColumnIndex),
                 Rows = rows
             };
 
-            RegisterCsvSymbolicReferences(csvPatchFile);
+            SymbolicIdService.RegisterCsvReferences(csvPatchFile);
             MelonLogger.Msg(
-                $"Loaded data patch '{modName}': '{csvPatchFile.RelativePath}' -> '{csvPatchFile.SourcePath}'");
+                $"Loaded data patch '{modProject.DisplayName}' (v{modProject.Version}, order {modProject.LoadOrder}): '{csvPatchFile.RelativePath}' -> '{csvPatchFile.SourcePath}'");
 
             return true;
         }

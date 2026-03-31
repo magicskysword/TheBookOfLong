@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using MelonLoader;
 
 namespace TheBookOfLong;
@@ -15,17 +14,11 @@ internal static partial class DataModManager
     private static readonly Dictionary<int, string> ResourcePathsByInstanceId = new();
     private static readonly Dictionary<string, List<CsvPatchFile>> CsvPatchesByLookupKey = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> PatchedContentCache = new(StringComparer.Ordinal);
-    private static readonly List<DataModDefinition> LoadedMods = new();
-    private static readonly Dictionary<string, SymbolicSourceInfo> SymbolicSourcesBySourcePath = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, SymbolicIdGroup> SymbolicGroupsBySourcePath = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, HashSet<string>> ExternalSymbolicIdsBySourcePath = new(StringComparer.OrdinalIgnoreCase);
 
     private static string _gameRoot = string.Empty;
-    private static string _modsRoot = string.Empty;
-    private static string _modsOfLongRoot = string.Empty;
     private static int _patchFileOrder;
 
-    internal static string ModsOfLongRoot => _modsOfLongRoot;
+    internal static string ModsOfLongRoot => ModProjectRegistry.ModsOfLongRoot;
 
     internal static void Initialize()
     {
@@ -37,55 +30,6 @@ internal static partial class DataModManager
             }
 
             ReloadDataMods();
-        }
-    }
-
-    internal static void RegisterExternalSymbolicReference(
-        string sourcePath,
-        string symbolicValue,
-        string modName,
-        string filePath,
-        string location)
-    {
-        if (!TryGetSymbolicId(symbolicValue, out string symbolicId))
-        {
-            return;
-        }
-
-        string canonicalSourcePath = BuildCanonicalSourcePath(sourcePath);
-        lock (Sync)
-        {
-            if (!ExternalSymbolicIdsBySourcePath.TryGetValue(canonicalSourcePath, out HashSet<string>? symbolicIds))
-            {
-                symbolicIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                ExternalSymbolicIdsBySourcePath[canonicalSourcePath] = symbolicIds;
-            }
-
-            symbolicIds.Add(symbolicId);
-        }
-
-        SymbolicFieldManager.RegisterReference(
-            canonicalSourcePath,
-            symbolicId,
-            modName,
-            filePath,
-            location,
-            "json-plotID");
-    }
-
-    internal static bool TryResolveSymbolicIdForSource(string sourcePath, string symbolicValue, out int assignedId)
-    {
-        assignedId = 0;
-        if (!TryGetSymbolicId(symbolicValue, out string symbolicId))
-        {
-            return false;
-        }
-
-        string canonicalSourcePath = BuildCanonicalSourcePath(sourcePath);
-        lock (Sync)
-        {
-            return SymbolicGroupsBySourcePath.TryGetValue(canonicalSourcePath, out SymbolicIdGroup? group)
-                   && group.AssignedIds.TryGetValue(symbolicId, out assignedId);
         }
     }
 
@@ -133,7 +77,7 @@ internal static partial class DataModManager
             }
 
             List<CsvPatchFile> matchingPatches = GetMatchingCsvPatches(sourcePath);
-            if (matchingPatches.Count == 0 || !LooksLikeCsvText(text))
+            if (matchingPatches.Count == 0 || !CsvPatchApplier.LooksLikeCsvText(text))
             {
                 return;
             }
@@ -150,7 +94,7 @@ internal static partial class DataModManager
 
             foreach (CsvPatchFile patchFile in matchingPatches)
             {
-                if (!TryMergeCsvPatch(
+                if (!CsvPatchApplier.TryMergePatch(
                     currentContent,
                     patchFile,
                     sourcePath,
@@ -182,7 +126,7 @@ internal static partial class DataModManager
                 });
             }
 
-            if (!TryFinalizePatchedCsv(currentContent, sourcePath, out string finalizedContent, out List<string> finalizationWarnings))
+            if (!CsvPatchApplier.TryFinalizePatchedCsv(currentContent, sourcePath, out string finalizedContent, out List<string> finalizationWarnings))
             {
                 return;
             }
@@ -228,99 +172,37 @@ internal static partial class DataModManager
 
     private static bool EnsureInitialized()
     {
-        if (!string.IsNullOrWhiteSpace(_modsOfLongRoot))
+        if (!string.IsNullOrWhiteSpace(_gameRoot))
         {
             return true;
         }
 
-        string? modsRoot = ResolveModsRoot();
-        if (string.IsNullOrWhiteSpace(modsRoot))
+        if (!ModProjectRegistry.Initialize())
         {
-            MelonLogger.Warning("Data mods path is unavailable. Could not resolve Mods directory.");
             return false;
         }
 
-        _modsRoot = Path.GetFullPath(modsRoot);
-        _gameRoot = ResolveGameRoot() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(_gameRoot))
-        {
-            DirectoryInfo? modsParent = Directory.GetParent(_modsRoot);
-            _gameRoot = modsParent?.FullName ?? string.Empty;
-        }
-
-        _modsOfLongRoot = Path.Combine(_modsRoot, "ModsOfLong");
-        Directory.CreateDirectory(_modsOfLongRoot);
+        _gameRoot = ModProjectRegistry.GameRoot;
         return true;
-    }
-
-    private static string? ResolveModsRoot()
-    {
-        try
-        {
-            string modsDirectory = MelonLoader.Utils.MelonEnvironment.ModsDirectory;
-            if (!string.IsNullOrWhiteSpace(modsDirectory))
-            {
-                return modsDirectory;
-            }
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            string gameRoot = MelonLoader.Utils.MelonEnvironment.GameRootDirectory;
-            if (!string.IsNullOrWhiteSpace(gameRoot))
-            {
-                return Path.Combine(gameRoot, "Mods");
-            }
-        }
-        catch
-        {
-        }
-
-        return null;
-    }
-
-    private static string? ResolveGameRoot()
-    {
-        try
-        {
-            string gameRoot = MelonLoader.Utils.MelonEnvironment.GameRootDirectory;
-            if (!string.IsNullOrWhiteSpace(gameRoot))
-            {
-                return Path.GetFullPath(gameRoot);
-            }
-        }
-        catch
-        {
-        }
-
-        return null;
     }
 
     private static void ReloadDataMods()
     {
-        LoadedMods.Clear();
         CsvPatchesByLookupKey.Clear();
         PatchedContentCache.Clear();
-        SymbolicSourcesBySourcePath.Clear();
-        SymbolicGroupsBySourcePath.Clear();
         _patchFileOrder = 0;
+        SymbolicIdService.Reset(_gameRoot);
 
-        string[] modDirectories = Directory.GetDirectories(_modsOfLongRoot, "mod*", SearchOption.TopDirectoryOnly);
-        Array.Sort(modDirectories, StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<IModProject> modProjects = ModProjectRegistry.GetEnabledProjectsSnapshot();
 
         List<CsvPatchFile> csvPatchFiles = new();
         int totalPatchFiles = 0;
-        foreach (string modDirectory in modDirectories)
+        for (int i = 0; i < modProjects.Count; i += 1)
         {
-            DataModDefinition dataMod = LoadDataMod(modDirectory, csvPatchFiles);
-            LoadedMods.Add(dataMod);
-            totalPatchFiles += dataMod.PatchFileCount;
+            totalPatchFiles += LoadDataMod(modProjects[i], csvPatchFiles);
         }
 
-        PrepareCsvPatches(csvPatchFiles);
+        SymbolicIdService.PrepareCsvPatches(csvPatchFiles);
         for (int i = 0; i < csvPatchFiles.Count; i += 1)
         {
             RegisterCsvPatch(csvPatchFiles[i]);
@@ -328,7 +210,7 @@ internal static partial class DataModManager
 
         SymbolicFieldManager.WriteReport();
 
-        MelonLogger.Msg($"ModsOfLong ready: '{_modsOfLongRoot}'. Loaded {LoadedMods.Count} data mod(s), {totalPatchFiles} CSV patch file(s).");
+        MelonLogger.Msg($"ModsOfLong ready: '{ModsOfLongRoot}'. Loaded {modProjects.Count} enabled data mod(s), {totalPatchFiles} CSV patch file(s).");
     }
 
     private static string NormalizeLookupKey(string path)
@@ -345,43 +227,6 @@ internal static partial class DataModManager
         return Convert.ToHexString(hash);
     }
 
-    private sealed class DataModInfoFile
-    {
-        public string? Name { get; set; }
-    }
-
-    private sealed class DataModDefinition
-    {
-        public string FolderName { get; set; } = string.Empty;
-
-        public string DisplayName { get; set; } = string.Empty;
-
-        public string ModDirectory { get; set; } = string.Empty;
-
-        public string DataDirectory { get; set; } = string.Empty;
-
-        public int PatchFileCount { get; set; }
-    }
-
-    private sealed class CsvPatchFile
-    {
-        public string ModName { get; set; } = string.Empty;
-
-        public string FullPath { get; set; } = string.Empty;
-
-        public string RelativePath { get; set; } = string.Empty;
-
-        public string SourcePath { get; set; } = string.Empty;
-
-        public int KeyColumnIndex { get; set; } = -1;
-
-        public int LoadOrder { get; set; }
-
-        public HashSet<string> SymbolicIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public List<List<string>> Rows { get; set; } = new();
-    }
-
     private sealed class FilePatchResult
     {
         public string ModName { get; set; } = string.Empty;
@@ -391,40 +236,5 @@ internal static partial class DataModManager
         public int AddedRowCount { get; set; }
 
         public int ModifiedRowCount { get; set; }
-    }
-
-    private sealed class SymbolicSourceInfo
-    {
-        public string SourcePath { get; set; } = string.Empty;
-
-        public int KeyColumnIndex { get; set; } = -1;
-
-        public bool HasBaseMaxId { get; set; }
-
-        public int BaseMaxId { get; set; }
-
-        public HashSet<string> SymbolicIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    }
-
-    private sealed class SymbolicIdGroup
-    {
-        public HashSet<string> SourcePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public HashSet<string> SymbolicIds { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public List<string> OrderedSymbolicIds { get; set; } = new();
-
-        public Dictionary<string, int> AssignedIds { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public int MaxAssignedId { get; set; }
-    }
-
-    private sealed class SortableRow
-    {
-        public int OriginalIndex { get; set; }
-
-        public int NumericId { get; set; }
-
-        public List<string> Row { get; set; } = new();
     }
 }

@@ -7,9 +7,9 @@ using System.Text.Json;
 
 namespace TheBookOfLong;
 
-internal static partial class GameComplexDataPatchManager
+internal static class ComplexTypeAccessor
 {
-    private static object CreateObjectInstance(Type type)
+    internal static object CreateObjectInstance(Type type)
     {
         if (type.IsValueType)
         {
@@ -30,12 +30,9 @@ internal static partial class GameComplexDataPatchManager
         return RuntimeHelpers.GetUninitializedObject(type);
     }
 
-    /// <summary>
-    /// 只暴露可安全写入的实例成员，避免在递归补丁时把 IL2CPP 桥接层和只读元数据也算进去。
-    /// </summary>
-    private static Dictionary<string, PatchableMember> GetPatchableMembers(Type type)
+    internal static Dictionary<string, ComplexPatchableMember> GetPatchableMembers(Type type)
     {
-        Dictionary<string, PatchableMember> members = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, ComplexPatchableMember> members = new(StringComparer.OrdinalIgnoreCase);
 
         for (Type? currentType = type;
              currentType is not null && currentType != typeof(object);
@@ -57,7 +54,7 @@ internal static partial class GameComplexDataPatchManager
                     continue;
                 }
 
-                members[property.Name] = new PatchableMember(
+                members[property.Name] = new ComplexPatchableMember(
                     property.Name,
                     property.PropertyType,
                     target => property.GetValue(target),
@@ -71,7 +68,7 @@ internal static partial class GameComplexDataPatchManager
                     continue;
                 }
 
-                members[field.Name] = new PatchableMember(
+                members[field.Name] = new ComplexPatchableMember(
                     field.Name,
                     field.FieldType,
                     target => field.GetValue(target),
@@ -82,7 +79,7 @@ internal static partial class GameComplexDataPatchManager
         return members;
     }
 
-    private static object CreateListInstance(Type listType, Type elementType)
+    internal static object CreateListInstance(Type listType, Type elementType)
     {
         Type concreteType = listType;
         if (listType.IsArray)
@@ -98,7 +95,7 @@ internal static partial class GameComplexDataPatchManager
         return CreateObjectInstance(concreteType);
     }
 
-    private static void AddCollectionItem(object collection, object? item)
+    internal static void AddCollectionItem(object collection, object? item)
     {
         MethodInfo? addMethod = null;
         foreach (MethodInfo candidate in collection.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public))
@@ -129,7 +126,7 @@ internal static partial class GameComplexDataPatchManager
         addMethod.Invoke(collection, new[] { item });
     }
 
-    private static void SetCollectionItem(object collection, int index, object? item)
+    internal static void SetCollectionItem(object collection, int index, object? item)
     {
         const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
@@ -150,7 +147,7 @@ internal static partial class GameComplexDataPatchManager
         throw new InvalidOperationException($"Collection type '{collection.GetType().FullName}' does not expose a usable indexed setter.");
     }
 
-    private static void RemoveCollectionItemAt(object collection, int index)
+    internal static void RemoveCollectionItemAt(object collection, int index)
     {
         const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         MethodInfo? removeAtMethod = collection.GetType().GetMethod("RemoveAt", Flags, null, new[] { typeof(int) }, null);
@@ -162,7 +159,7 @@ internal static partial class GameComplexDataPatchManager
         removeAtMethod.Invoke(collection, new object[] { index });
     }
 
-    private static List<object?> EnumerateCollection(object collection)
+    internal static List<object?> EnumerateCollection(object collection)
     {
         if (collection is IEnumerable enumerable)
         {
@@ -195,7 +192,7 @@ internal static partial class GameComplexDataPatchManager
         return items;
     }
 
-    private static Type? ResolveCollectionElementType(Type collectionType)
+    internal static Type? ResolveCollectionElementType(Type collectionType)
     {
         if (collectionType.IsArray)
         {
@@ -207,7 +204,7 @@ internal static partial class GameComplexDataPatchManager
             : null;
     }
 
-    private static bool TryResolveCollectionElementType(Type collectionType, out Type? elementType)
+    internal static bool TryResolveCollectionElementType(Type collectionType, out Type? elementType)
     {
         elementType = null;
 
@@ -242,12 +239,12 @@ internal static partial class GameComplexDataPatchManager
         return false;
     }
 
-    private static string? GetNameValue(object target)
+    internal static string? GetNameValue(object target)
     {
         return TryGetMemberValue(target, "name", out object? value) ? value?.ToString() : null;
     }
 
-    private static string GetRequiredStringProperty(JsonElement element, string propertyName, string filePath, string jsonPath)
+    internal static string GetRequiredStringProperty(JsonElement element, string propertyName, string filePath, string jsonPath)
     {
         if (element.TryGetProperty(propertyName, out JsonElement propertyValue) && propertyValue.ValueKind == JsonValueKind.String)
         {
@@ -261,7 +258,7 @@ internal static partial class GameComplexDataPatchManager
         throw new InvalidOperationException($"Patch file '{filePath}' is missing a non-empty string property '{propertyName}' at '{jsonPath}'.");
     }
 
-    private static Type? GetMemberType(Type targetType, string memberName)
+    internal static Type? GetMemberType(Type targetType, string memberName)
     {
         const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
@@ -275,7 +272,7 @@ internal static partial class GameComplexDataPatchManager
         return field?.FieldType;
     }
 
-    private static bool TryGetMemberValue(object target, string memberName, out object? value)
+    internal static bool TryGetMemberValue(object target, string memberName, out object? value)
     {
         Type type = target.GetType();
         const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -298,7 +295,7 @@ internal static partial class GameComplexDataPatchManager
         return false;
     }
 
-    private static void SetMemberValue(object target, string memberName, object? value)
+    internal static void SetMemberValue(object target, string memberName, object? value)
     {
         Type type = target.GetType();
         const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
