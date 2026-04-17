@@ -29,7 +29,7 @@ internal static partial class GameComplexDataPatchManager
             }
 
             if (GameComplexDataDumpManager.IsExportCompleted(dumpCycleId)
-                && IsPatchTargetsReady(out var worldPlotEventController, out var missionDataController))
+                && ComplexDataTargets.TryGetReadyControllers(out var worldPlotEventController, out var missionDataController))
             {
                 ApplyLoadedPatchFiles(applyCycleId, dumpCycleId, worldPlotEventController!, missionDataController!);
                 yield break;
@@ -39,38 +39,15 @@ internal static partial class GameComplexDataPatchManager
         }
     }
 
-    private static bool IsPatchTargetsReady(out global::Il2Cpp.WorldPlotEventController? worldPlotEventController,out global::Il2Cpp.MissionDataController? missionDataController)
-    {
-        worldPlotEventController = global::Il2Cpp.WorldPlotEventController.Instance;
-        missionDataController = global::Il2Cpp.MissionDataController.Instance;
-
-        if (worldPlotEventController is null || missionDataController is null)
-        {
-            return false;
-        }
-
-        return ComplexTypeAccessor.TryGetMemberValue(worldPlotEventController, "WorldPlotEventDataBase", out object? worldPlotEventDataBase)
-               && worldPlotEventDataBase is not null
-               && ComplexTypeAccessor.TryGetMemberValue(missionDataController, "bountyMissionDataBase", out object? bountyMissionDataBase)
-               && bountyMissionDataBase is not null
-               && ComplexTypeAccessor.TryGetMemberValue(missionDataController, "MainMissionDataBase", out object? mainMissionDataBase)
-               && mainMissionDataBase is not null
-               && ComplexTypeAccessor.TryGetMemberValue(missionDataController, "BranchMissionDataBase", out object? branchMissionDataBase)
-               && branchMissionDataBase is not null
-               && ComplexTypeAccessor.TryGetMemberValue(missionDataController, "LittleMissionDataBase", out object? littleMissionDataBase)
-               && littleMissionDataBase is not null
-               && ComplexTypeAccessor.TryGetMemberValue(missionDataController, "TreasureMapMissionDataBase", out object? treasureMapMissionDataBase)
-               && treasureMapMissionDataBase is not null
-               && ComplexTypeAccessor.TryGetMemberValue(missionDataController, "SpeKillerMissionDataBase", out object? speKillerMissionDataBase)
-               && speKillerMissionDataBase is not null;
-    }
-
     private static void ApplyLoadedPatchFiles(
         int applyCycleId,
         int dumpCycleId,
         global::Il2Cpp.WorldPlotEventController worldPlotEventController,
         global::Il2Cpp.MissionDataController missionDataController)
     {
+        string targetSignature = ComplexDataTargets.BuildTargetSignature(worldPlotEventController, missionDataController);
+        bool skipDuplicate = false;
+
         lock (Sync)
         {
             if (applyCycleId != _applyCycleId
@@ -80,7 +57,22 @@ internal static partial class GameComplexDataPatchManager
                 return;
             }
 
-            _applyState = ApplyState.Applying;
+            if (string.Equals(targetSignature, _lastAppliedTargetSignature, StringComparison.Ordinal))
+            {
+                _applyState = ApplyState.Completed;
+                skipDuplicate = true;
+            }
+            else
+            {
+                _applyState = ApplyState.Applying;
+            }
+        }
+
+        if (skipDuplicate)
+        {
+            MelonLoader.MelonLogger.Msg(
+                $"Skipped duplicate game complex data patch cycle {applyCycleId} for dump cycle {dumpCycleId} because target object graph is unchanged.");
+            return;
         }
 
         try
@@ -133,6 +125,7 @@ internal static partial class GameComplexDataPatchManager
                 if (applyCycleId == _applyCycleId && dumpCycleId == _waitingDumpCycleId)
                 {
                     _applyState = ApplyState.Completed;
+                    _lastAppliedTargetSignature = targetSignature;
                 }
             }
         }

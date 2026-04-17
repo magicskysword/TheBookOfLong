@@ -39,6 +39,7 @@ internal static partial class GameComplexDataPatchManager
     private static ApplyState _applyState;
     private static int _applyCycleId;
     private static int _waitingDumpCycleId;
+    private static string _lastAppliedTargetSignature = string.Empty;
     private static bool _isInitialized;
 
     internal static void Initialize()
@@ -63,6 +64,7 @@ internal static partial class GameComplexDataPatchManager
     internal static void StartApplyCycle(int dumpCycleId)
     {
         int applyCycleId;
+        bool hasPatchFiles;
 
         lock (Sync)
         {
@@ -87,13 +89,14 @@ internal static partial class GameComplexDataPatchManager
             _applyCycleId += 1;
             applyCycleId = _applyCycleId;
             _waitingDumpCycleId = dumpCycleId;
+            hasPatchFiles = LoadedPatchFiles.Count > 0;
 
-            _applyState = LoadedPatchFiles.Count == 0
-                ? ApplyState.NoPatches
-                : ApplyState.WaitingForSceneData;
+            _applyState = hasPatchFiles
+                ? ApplyState.WaitingForSceneData
+                : ApplyState.NoPatches;
         }
 
-        if (LoadedPatchFiles.Count > 0)
+        if (hasPatchFiles)
         {
             MelonLoader.MelonCoroutines.Start(WaitAndApplyPatches(applyCycleId, dumpCycleId));
         }

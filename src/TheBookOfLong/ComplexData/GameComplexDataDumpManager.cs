@@ -20,21 +20,12 @@ internal static class GameComplexDataDumpManager
         WriteIndented = true
     };
 
-    private static readonly string[] MissionDataFieldNames =
-    {
-        "bountyMissionDataBase",
-        "MainMissionDataBase",
-        "BranchMissionDataBase",
-        "LittleMissionDataBase",
-        "TreasureMapMissionDataBase",
-        "SpeKillerMissionDataBase"
-    };
-
     private static string _gameRoot = string.Empty;
     private static string _dumpRoot = string.Empty;
     private static string _latestRoot = string.Empty;
     private static int _exportCycleId;
     private static ExportState _exportState;
+    private static string _lastExportTargetSignature = string.Empty;
 
     internal static bool IsExportCompleted(int cycleId)
     {
@@ -94,10 +85,7 @@ internal static class GameComplexDataDumpManager
                 yield break;
             }
 
-            global::Il2Cpp.WorldPlotEventController? worldPlotEventController = global::Il2Cpp.WorldPlotEventController.Instance;
-            global::Il2Cpp.MissionDataController? missionDataController = global::Il2Cpp.MissionDataController.Instance;
-
-            if (IsComplexDataReady(worldPlotEventController, missionDataController))
+            if (ComplexDataTargets.TryGetReadyControllers(out var worldPlotEventController, out var missionDataController))
             {
                 ExportComplexData(cycleId, worldPlotEventController!, missionDataController!);
                 yield break;
@@ -105,33 +93,6 @@ internal static class GameComplexDataDumpManager
 
             yield return null;
         }
-    }
-
-    private static bool IsComplexDataReady(
-        global::Il2Cpp.WorldPlotEventController? worldPlotEventController,
-        global::Il2Cpp.MissionDataController? missionDataController)
-    {
-        if (worldPlotEventController is null || missionDataController is null)
-        {
-            return false;
-        }
-
-        if (!TryGetMemberValue(worldPlotEventController, "WorldPlotEventDataBase", out object? worldPlotEventDataBase)
-            || worldPlotEventDataBase is null)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < MissionDataFieldNames.Length; i += 1)
-        {
-            if (!TryGetMemberValue(missionDataController, MissionDataFieldNames[i], out object? missionDataValue)
-                || missionDataValue is null)
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static void ExportComplexData(
@@ -151,7 +112,8 @@ internal static class GameComplexDataDumpManager
 
         try
         {
-            string complexDataRoot;
+            string targetSignature = ComplexDataTargets.BuildTargetSignature(worldPlotEventController, missionDataController);
+            bool skipDuplicate = false;
             lock (Sync)
             {
                 if (cycleId != _exportCycleId)
@@ -165,9 +127,21 @@ internal static class GameComplexDataDumpManager
                     return;
                 }
 
-                complexDataRoot = PrepareComplexDataRoot();
+                if (string.Equals(targetSignature, _lastExportTargetSignature, StringComparison.Ordinal))
+                {
+                    _exportState = ExportState.Completed;
+                    skipDuplicate = true;
+                }
             }
 
+            if (skipDuplicate)
+            {
+                MelonLoader.MelonLogger.Msg(
+                    $"Skipped duplicate game complex data export cycle {cycleId} because target object graph is unchanged.");
+                return;
+            }
+
+            string complexDataRoot = PrepareComplexDataRoot();
             int exportedFileCount = 0;
 
             exportedFileCount += ExportControllerMember(
@@ -176,7 +150,7 @@ internal static class GameComplexDataDumpManager
                 "WorldPlotEventController",
                 "WorldPlotEventDataBase");
 
-            foreach (string fieldName in MissionDataFieldNames)
+            foreach (string fieldName in ComplexDataTargets.MissionDataFieldNames)
             {
                 exportedFileCount += ExportControllerMember(
                     complexDataRoot,
@@ -190,6 +164,7 @@ internal static class GameComplexDataDumpManager
                 if (cycleId == _exportCycleId)
                 {
                     _exportState = ExportState.Completed;
+                    _lastExportTargetSignature = targetSignature;
                 }
             }
 
@@ -212,7 +187,7 @@ internal static class GameComplexDataDumpManager
 
     private static int ExportControllerMember(string complexDataRoot, object controller, string controllerName, string memberName)
     {
-        if (!TryGetMemberValue(controller, memberName, out object? memberValue))
+        if (!ComplexTypeAccessor.TryGetMemberValue(controller, memberName, out object? memberValue))
         {
             MelonLoader.MelonLogger.Warning(
                 $"Could not find '{controllerName}.{memberName}' while exporting game complex data.");
@@ -229,29 +204,6 @@ internal static class GameComplexDataDumpManager
         string json = JsonSerializer.Serialize(serializableValue, JsonOptions);
         File.WriteAllText(filePath, json, Utf8NoBom);
         return 1;
-    }
-
-    private static bool TryGetMemberValue(object target, string memberName, out object? value)
-    {
-        Type type = target.GetType();
-        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-        PropertyInfo? property = type.GetProperty(memberName, Flags);
-        if (property is not null && property.GetIndexParameters().Length == 0 && property.CanRead)
-        {
-            value = property.GetValue(target);
-            return true;
-        }
-
-        FieldInfo? field = type.GetField(memberName, Flags);
-        if (field is not null)
-        {
-            value = field.GetValue(target);
-            return true;
-        }
-
-        value = null;
-        return false;
     }
 
     private static object? ToSerializableValue(object? value, int depth, HashSet<object> visited)

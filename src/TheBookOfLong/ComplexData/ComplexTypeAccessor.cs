@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Il2CppInterop.Runtime.InteropTypes;
 
 namespace TheBookOfLong;
 
@@ -16,18 +17,152 @@ internal static class ComplexTypeAccessor
             return Activator.CreateInstance(type)!;
         }
 
-        ConstructorInfo? constructor = type.GetConstructor(
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-            binder: null,
-            Type.EmptyTypes,
-            modifiers: null);
-
-        if (constructor is not null)
+        if (TryCreateObjectInstanceViaConstructors(type, out object? instance, out Exception? lastConstructorException))
         {
-            return constructor.Invoke(Array.Empty<object>());
+            return instance!;
+        }
+
+        if (IsIl2CppReferenceType(type))
+        {
+            throw new InvalidOperationException(
+                $"Could not create IL2CPP object instance for '{type.FullName}'.",
+                lastConstructorException);
         }
 
         return RuntimeHelpers.GetUninitializedObject(type);
+    }
+
+    internal static long GetObjectIdentity(object? value)
+    {
+        if (value is null)
+        {
+            return 0;
+        }
+
+        return value is Il2CppObjectBase il2CppObject
+            ? il2CppObject.Pointer.ToInt64()
+            : RuntimeHelpers.GetHashCode(value);
+    }
+
+    private static bool TryCreateObjectInstanceViaConstructors(Type type, out object? instance, out Exception? lastException)
+    {
+        ConstructorInfo[] constructors = type.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        Array.Sort(constructors, CompareConstructors);
+
+        lastException = null;
+        for (int i = 0; i < constructors.Length; i += 1)
+        {
+            ConstructorInfo constructor = constructors[i];
+            if (!IsUsableObjectConstructor(constructor))
+            {
+                continue;
+            }
+
+            try
+            {
+                object?[] arguments = BuildConstructorArguments(constructor);
+                instance = constructor.Invoke(arguments);
+                return true;
+            }
+            catch (TargetInvocationException ex)
+            {
+                lastException = ex.InnerException ?? ex;
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+            }
+        }
+
+        instance = null;
+        return false;
+    }
+
+    private static int CompareConstructors(ConstructorInfo left, ConstructorInfo right)
+    {
+        int leftScore = GetConstructorSortScore(left);
+        int rightScore = GetConstructorSortScore(right);
+        int scoreComparison = leftScore.CompareTo(rightScore);
+        if (scoreComparison != 0)
+        {
+            return scoreComparison;
+        }
+
+        return right.IsPublic.CompareTo(left.IsPublic);
+    }
+
+    private static int GetConstructorSortScore(ConstructorInfo constructor)
+    {
+        int parameterCount = constructor.GetParameters().Length;
+        return IsUsableObjectConstructor(constructor) ? parameterCount : 1000 + parameterCount;
+    }
+
+    private static bool IsUsableObjectConstructor(ConstructorInfo constructor)
+    {
+        ParameterInfo[] parameters = constructor.GetParameters();
+        for (int i = 0; i < parameters.Length; i += 1)
+        {
+            ParameterInfo parameter = parameters[i];
+            Type parameterType = parameter.ParameterType;
+            if (parameter.IsOut
+                || parameterType.IsByRef
+                || parameterType.IsPointer
+                || parameterType == typeof(IntPtr)
+                || parameterType == typeof(UIntPtr))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static object?[] BuildConstructorArguments(ConstructorInfo constructor)
+    {
+        ParameterInfo[] parameters = constructor.GetParameters();
+        object?[] arguments = new object?[parameters.Length];
+
+        for (int i = 0; i < parameters.Length; i += 1)
+        {
+            ParameterInfo parameter = parameters[i];
+            if (parameter.HasDefaultValue)
+            {
+                arguments[i] = parameter.DefaultValue is DBNull
+                    ? CreateDefaultConstructorArgument(parameter.ParameterType)
+                    : parameter.DefaultValue;
+                continue;
+            }
+
+            arguments[i] = CreateDefaultConstructorArgument(parameter.ParameterType);
+        }
+
+        return arguments;
+    }
+
+    private static object? CreateDefaultConstructorArgument(Type parameterType)
+    {
+        Type effectiveType = parameterType.IsByRef
+            ? parameterType.GetElementType() ?? parameterType
+            : parameterType;
+
+        if (effectiveType == typeof(string))
+        {
+            return string.Empty;
+        }
+
+        if (Nullable.GetUnderlyingType(effectiveType) is not null)
+        {
+            return null;
+        }
+
+        return effectiveType.IsValueType
+            ? Activator.CreateInstance(effectiveType)
+            : null;
+    }
+
+    private static bool IsIl2CppReferenceType(Type type)
+    {
+        return !type.IsValueType && typeof(Il2CppObjectBase).IsAssignableFrom(type);
     }
 
     internal static Dictionary<string, ComplexPatchableMember> GetPatchableMembers(Type type)
