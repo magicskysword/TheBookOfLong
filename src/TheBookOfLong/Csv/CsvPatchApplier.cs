@@ -117,6 +117,19 @@ internal static class CsvPatchApplier
             return true;
         }
 
+        CsvSpecialPatchKind specialPatchKind = CsvSpecialPatchRules.GetPatchKind(sourcePath);
+        if (specialPatchKind == CsvSpecialPatchKind.TransposedTable)
+        {
+            return TransposedCsvPatchApplier.TryMergePatch(
+                baseRows,
+                patchFile,
+                sourcePath,
+                out mergedContent,
+                out addedRowCount,
+                out modifiedRowCount,
+                out warning);
+        }
+
         List<string> baseHeader = baseRows[0];
         List<string> patchHeader = patchFile.Rows[0];
         if (!CsvUtility.HeadersEqual(baseHeader, patchHeader, out string? headerMismatch))
@@ -126,7 +139,7 @@ internal static class CsvPatchApplier
         }
 
         int keyColumnIndex = CsvUtility.ResolveKeyColumnIndex(baseHeader);
-        if (UsesPlotDataBlockMerge(sourcePath))
+        if (specialPatchKind == CsvSpecialPatchKind.PlotDataBlock)
         {
             return PlotDataPatchApplier.TryMergePatch(
                 baseRows,
@@ -196,14 +209,6 @@ internal static class CsvPatchApplier
 
         mergedContent = CsvUtility.Serialize(baseRows);
         return true;
-    }
-
-    private static bool UsesPlotDataBlockMerge(string sourcePath)
-    {
-        return string.Equals(
-            SymbolicIdService.BuildCanonicalSourcePath(sourcePath),
-            SymbolicIdService.BuildCanonicalSourcePath("GameData/PlotData.csv"),
-            StringComparison.OrdinalIgnoreCase);
     }
 
     private static List<int> EnsureSequentialRowsForGroup(List<List<string>> rows, int keyColumnIndex, int startId, int endId)
