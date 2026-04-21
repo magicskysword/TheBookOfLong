@@ -83,7 +83,7 @@ internal static partial class GameComplexDataPatchManager
                 Target = targetDefinition
             };
 
-            RegisterSymbolicPlotIdReferences(patchFile);
+            RegisterSymbolicFieldReferences(patchFile);
             MelonLoader.MelonLogger.Msg(
                 $"Loaded complex data patch '{modProject.DisplayName}' (v{modProject.Version}, order {modProject.LoadOrder}): '{patchFile.RelativePath}'");
             return true;
@@ -95,12 +95,12 @@ internal static partial class GameComplexDataPatchManager
         }
     }
 
-    private static void RegisterSymbolicPlotIdReferences(ComplexJsonPatchFile patchFile)
+    private static void RegisterSymbolicFieldReferences(ComplexJsonPatchFile patchFile)
     {
-        RegisterSymbolicPlotIdReferencesRecursive(patchFile.RootElement, patchFile, "$");
+        RegisterSymbolicFieldReferencesRecursive(patchFile.RootElement, patchFile, "$");
     }
 
-    private static void RegisterSymbolicPlotIdReferencesRecursive(JsonElement element, ComplexJsonPatchFile patchFile, string jsonPath)
+    private static void RegisterSymbolicFieldReferencesRecursive(JsonElement element, ComplexJsonPatchFile patchFile, string jsonPath)
     {
         switch (element.ValueKind)
         {
@@ -108,22 +108,8 @@ internal static partial class GameComplexDataPatchManager
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
                     string childPath = $"{jsonPath}.{property.Name}";
-                    if (string.Equals(property.Name, "plotID", StringComparison.Ordinal)
-                        && property.Value.ValueKind == JsonValueKind.String)
-                    {
-                        string rawValue = property.Value.GetString()?.Trim() ?? string.Empty;
-                        if (rawValue.Length > 3 && rawValue.StartsWith("mod", StringComparison.OrdinalIgnoreCase))
-                        {
-                            SymbolicIdService.RegisterExternalReference(
-                                PlotDataSourcePath,
-                                rawValue,
-                                patchFile.ModName,
-                                patchFile.RelativePath,
-                                childPath);
-                        }
-                    }
-
-                    RegisterSymbolicPlotIdReferencesRecursive(property.Value, patchFile, childPath);
+                    ComplexSymbolicFieldRules.RegisterReferencesForJsonProperty(property, patchFile, childPath);
+                    RegisterSymbolicFieldReferencesRecursive(property.Value, patchFile, childPath);
                 }
 
                 break;
@@ -132,7 +118,7 @@ internal static partial class GameComplexDataPatchManager
                 int index = 0;
                 foreach (JsonElement childElement in element.EnumerateArray())
                 {
-                    RegisterSymbolicPlotIdReferencesRecursive(childElement, patchFile, $"{jsonPath}[{index}]");
+                    RegisterSymbolicFieldReferencesRecursive(childElement, patchFile, $"{jsonPath}[{index}]");
                     index += 1;
                 }
 

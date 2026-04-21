@@ -6,7 +6,7 @@ namespace TheBookOfLong;
 
 /// <summary>
 /// 负责把 ModsOfLong 中的复杂 JSON 补丁回写到运行时控制器实例。
-/// 这层只处理“游戏场景内才存在”的对象型数据，并接入 plotID 的 modXXX 符号 ID 解析。
+/// 这层只处理“游戏场景内才存在”的对象型数据，并接入 ComplexData 中集中登记的 modXXX 符号字段解析规则。
 /// 实际时序是：
 /// 1. 每次 GameController.Start 触发一轮新的 ComplexData Dump。
 /// 2. Dump 当前场景的原始运行时数据。

@@ -40,7 +40,8 @@ internal static class SymbolicIdService
         string symbolicValue,
         string modName,
         string filePath,
-        string location)
+        string location,
+        string referenceType = "json-plotID")
     {
         if (!TryGetSymbolicId(symbolicValue, out string symbolicId))
         {
@@ -65,7 +66,7 @@ internal static class SymbolicIdService
             modName,
             filePath,
             location,
-            "json-plotID");
+            referenceType);
     }
 
     internal static bool TryResolveIdForSource(string sourcePath, string symbolicValue, out int assignedId)

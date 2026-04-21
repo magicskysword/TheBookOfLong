@@ -55,9 +55,9 @@ internal static class ComplexJsonValuePatcher
                 : ComplexTypeAccessor.CreateObjectInstance(effectiveType);
         }
 
-        if (string.Equals(memberName, "plotID", StringComparison.Ordinal) && effectiveType == typeof(int))
+        if (ComplexSymbolicFieldRules.TryConvertValue(element, effectiveType, memberName, patchFile, jsonPath, out object? symbolicValue))
         {
-            return ResolvePlotIdValue(element, patchFile, jsonPath);
+            return symbolicValue;
         }
 
         if (effectiveType == typeof(string))
@@ -177,9 +177,9 @@ internal static class ComplexJsonValuePatcher
             return ConvertJsonElementToValue(element, targetType, patchFile, jsonPath, memberName);
         }
 
-        if (string.Equals(memberName, "plotID", StringComparison.Ordinal) && effectiveType == typeof(int))
+        if (ComplexSymbolicFieldRules.TryConvertValue(element, effectiveType, memberName, patchFile, jsonPath, out object? symbolicValue))
         {
-            return ResolvePlotIdValue(element, patchFile, jsonPath);
+            return symbolicValue;
         }
 
         if (effectiveType == typeof(string)
@@ -276,29 +276,7 @@ internal static class ComplexJsonValuePatcher
         }
     }
 
-    private static object ResolvePlotIdValue(JsonElement element, ComplexJsonPatchFile patchFile, string jsonPath)
-    {
-        if (element.ValueKind == JsonValueKind.String)
-        {
-            string rawValue = element.GetString()?.Trim() ?? string.Empty;
-            if (int.TryParse(rawValue, out int numericId))
-            {
-                return numericId;
-            }
-
-            if (SymbolicIdService.TryResolveIdForSource(GameComplexDataPatchManager.PlotDataSourcePath, rawValue, out int assignedId))
-            {
-                return assignedId;
-            }
-
-            throw new InvalidOperationException(
-                $"Could not resolve symbolic plotID '{rawValue}' referenced by '{patchFile.FullPath}' at '{jsonPath}'.");
-        }
-
-        return ReadNumericValue(element, typeof(int), jsonPath);
-    }
-
-    private static object ReadNumericValue(JsonElement element, Type targetType, string jsonPath)
+    internal static object ReadNumericValue(JsonElement element, Type targetType, string jsonPath)
     {
         if (element.ValueKind == JsonValueKind.String)
         {
