@@ -21,6 +21,8 @@ internal sealed class CsvPatchFile
     // 其他系统只能引用这里定义过的 ID；分配顺序也以这里的主键排序为准。
     public List<string> OrderedPrimarySymbolicIds { get; set; } = new();
 
+    // 当前 patch 文件里出现过的全部 modXXX。
+    // 除主键外，也包含 PlotData 这类特殊列里的引用型字符串 ID。
     public HashSet<string> SymbolicIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public List<List<string>> Rows { get; set; } = new();

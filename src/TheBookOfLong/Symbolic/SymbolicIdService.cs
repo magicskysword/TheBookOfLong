@@ -12,6 +12,10 @@ namespace TheBookOfLong;
 /// </summary>
 internal static class SymbolicIdService
 {
+    private const string PlotDataSourcePath = "GameData/PlotData.csv";
+    private const string PlotDataFunctionColumnName = "调用函数";
+    private const string PlotDataOptionColumnName = "选项";
+
     private static readonly object Sync = new();
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
     private static readonly Dictionary<string, SymbolicSourceInfo> SymbolicSourcesBySourcePath = new(StringComparer.OrdinalIgnoreCase);
@@ -126,6 +130,7 @@ internal static class SymbolicIdService
     {
         if (patchFile.KeyColumnIndex < 0)
         {
+            RegisterPlotDataCellReferences(patchFile);
             return;
         }
 
@@ -145,6 +150,8 @@ internal static class SymbolicIdService
                 $"row {rowIndex + 1}",
                 "csv-key");
         }
+
+        RegisterPlotDataCellReferences(patchFile);
     }
 
     internal static void PrepareCsvPatches(List<CsvPatchFile> csvPatchFiles)
@@ -178,7 +185,7 @@ internal static class SymbolicIdService
                 }
 
                 sourceInfo.PrimarySymbolicIds.UnionWith(patchFile.OrderedPrimarySymbolicIds);
-                sourceInfo.ReferencedSymbolicIds.UnionWith(patchFile.OrderedPrimarySymbolicIds);
+                sourceInfo.ReferencedSymbolicIds.UnionWith(patchFile.SymbolicIds);
             }
 
             MergeExternalSymbolicSources(symbolicSources);
@@ -457,6 +464,10 @@ internal static class SymbolicIdService
             return;
         }
 
+        bool isPlotDataSource = IsPlotDataSource(patchFile.SourcePath) && patchFile.Rows.Count > 0;
+        int functionColumnIndex = isPlotDataSource ? FindHeaderIndex(patchFile.Rows[0], PlotDataFunctionColumnName) : -1;
+        int optionColumnIndex = isPlotDataSource ? FindHeaderIndex(patchFile.Rows[0], PlotDataOptionColumnName) : -1;
+
         List<List<string>> resolvedRows = new(patchFile.Rows.Count);
         for (int rowIndex = 0; rowIndex < patchFile.Rows.Count; rowIndex += 1)
         {
@@ -472,10 +483,112 @@ internal static class SymbolicIdService
                 }
             }
 
+            if (rowIndex > 0)
+            {
+                ReplacePlotDataCellSymbolicIds(row, functionColumnIndex, PlotDataSymbolicIdResolver.RewriteFunctionCell, group.AssignedIds);
+                ReplacePlotDataCellSymbolicIds(row, optionColumnIndex, PlotDataSymbolicIdResolver.RewriteOptionCell, group.AssignedIds);
+            }
+
             resolvedRows.Add(row);
         }
 
         patchFile.Rows = resolvedRows;
+    }
+
+    private static void RegisterPlotDataCellReferences(CsvPatchFile patchFile)
+    {
+        if (!IsPlotDataSource(patchFile.SourcePath) || patchFile.Rows.Count == 0)
+        {
+            return;
+        }
+
+        List<string> header = patchFile.Rows[0];
+        int functionColumnIndex = FindHeaderIndex(header, PlotDataFunctionColumnName);
+        int optionColumnIndex = FindHeaderIndex(header, PlotDataOptionColumnName);
+
+        for (int rowIndex = 1; rowIndex < patchFile.Rows.Count; rowIndex += 1)
+        {
+            RegisterPlotDataCellReference(
+                patchFile,
+                rowIndex,
+                functionColumnIndex,
+                PlotDataFunctionColumnName,
+                "csv-plot-function-param",
+                PlotDataSymbolicIdResolver.RewriteFunctionCell);
+            RegisterPlotDataCellReference(
+                patchFile,
+                rowIndex,
+                optionColumnIndex,
+                PlotDataOptionColumnName,
+                "csv-plot-choice-param",
+                PlotDataSymbolicIdResolver.RewriteOptionCell);
+        }
+    }
+
+    private static void RegisterPlotDataCellReference(
+        CsvPatchFile patchFile,
+        int rowIndex,
+        int columnIndex,
+        string columnName,
+        string referenceType,
+        Func<string, Func<string, string?>, string> rewriteCell)
+    {
+        if (columnIndex < 0)
+        {
+            return;
+        }
+
+        string cellValue = CsvUtility.GetCell(patchFile.Rows[rowIndex], columnIndex);
+        if (string.IsNullOrWhiteSpace(cellValue))
+        {
+            return;
+        }
+
+        rewriteCell(
+            cellValue,
+            symbolicId =>
+            {
+                patchFile.SymbolicIds.Add(symbolicId);
+                SymbolicFieldManager.RegisterReference(
+                    patchFile.SourcePath,
+                    symbolicId,
+                    patchFile.ModName,
+                    patchFile.RelativePath,
+                    $"row {rowIndex + 1} column {columnName}",
+                    referenceType);
+                return null;
+            });
+    }
+
+    private static void ReplacePlotDataCellSymbolicIds(
+        List<string> row,
+        int columnIndex,
+        Func<string, Func<string, string?>, string> rewriteCell,
+        IReadOnlyDictionary<string, int> assignedIds)
+    {
+        if (columnIndex < 0)
+        {
+            return;
+        }
+
+        string originalValue = CsvUtility.GetCell(row, columnIndex);
+        if (string.IsNullOrWhiteSpace(originalValue))
+        {
+            return;
+        }
+
+        string rewrittenValue = rewriteCell(
+            originalValue,
+            symbolicId => assignedIds.TryGetValue(symbolicId, out int assignedId)
+                ? assignedId.ToString()
+                : null);
+        if (string.Equals(rewrittenValue, originalValue, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        EnsureCell(row, columnIndex);
+        row[columnIndex] = rewrittenValue;
     }
 
     private static bool TryGetBaseMaxId(
@@ -559,6 +672,35 @@ internal static class SymbolicIdService
         string normalized = path.Replace('\\', '/').TrimStart('/');
         string[] segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
         return string.Join(Path.DirectorySeparatorChar, segments);
+    }
+
+    private static bool IsPlotDataSource(string sourcePath)
+    {
+        return string.Equals(
+            BuildCanonicalSourcePath(sourcePath),
+            BuildCanonicalSourcePath(PlotDataSourcePath),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int FindHeaderIndex(List<string> header, string columnName)
+    {
+        for (int i = 0; i < header.Count; i += 1)
+        {
+            if (string.Equals(header[i].Trim(), columnName, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static void EnsureCell(List<string> row, int columnIndex)
+    {
+        while (row.Count <= columnIndex)
+        {
+            row.Add(string.Empty);
+        }
     }
 
     private static string FormatSourcePathList(IEnumerable<string> sourcePaths)
