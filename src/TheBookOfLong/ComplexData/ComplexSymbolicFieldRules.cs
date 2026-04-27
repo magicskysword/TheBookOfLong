@@ -1,26 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Text.Json;
 
 namespace TheBookOfLong;
 
 /// <summary>
 /// 统一登记 ComplexData 里哪些字段需要接入 modXXX 符号 ID。
-/// 这里故意只按“字段名 + 分隔符”做处理，不再按函数名判定，便于后续集中维护与扩展。
+/// 这里故意只按“字段名 + 统一分隔符列表”做处理，不再按函数名判定，便于后续集中维护与扩展。
 /// </summary>
 internal static class ComplexSymbolicFieldRules
 {
-    private static readonly char[] TokenDelimiters =
-    {
-        ';',
-        '|',
-        '-',
-        '/',
-        '~',
-        ':'
-    };
-
     private static readonly Dictionary<string, ComplexSymbolicFieldRule> RulesByMemberName = new(StringComparer.Ordinal)
     {
         // 直接引用 PlotData 的数值 ID 字段。
@@ -70,7 +59,7 @@ internal static class ComplexSymbolicFieldRules
             return;
         }
 
-        VisitDelimitedSymbolicIds(
+        DelimitedSymbolicIdRewriter.Visit(
             property.Value.GetString() ?? string.Empty,
             symbolicId => RegisterReference(symbolicId, patchFile, jsonPath, rule.ReferenceType));
     }
@@ -107,7 +96,9 @@ internal static class ComplexSymbolicFieldRules
         }
 
         string rawValue = element.ValueKind == JsonValueKind.String ? element.GetString() ?? string.Empty : element.ToString();
-        convertedValue = RewriteDelimitedStringValue(rawValue, patchFile, jsonPath, memberName);
+        convertedValue = DelimitedSymbolicIdRewriter.Rewrite(
+            rawValue,
+            symbolicId => ResolveDelimitedSymbolicId(symbolicId, patchFile, jsonPath, memberName));
         return true;
     }
 
@@ -133,129 +124,15 @@ internal static class ComplexSymbolicFieldRules
         return ComplexJsonValuePatcher.ReadNumericValue(element, typeof(int), jsonPath);
     }
 
-    private static string RewriteDelimitedStringValue(string value, ComplexJsonPatchFile patchFile, string jsonPath, string memberName)
+    private static string? ResolveDelimitedSymbolicId(string symbolicId, ComplexJsonPatchFile patchFile, string jsonPath, string memberName)
     {
-        if (string.IsNullOrEmpty(value))
-        {
-            return value;
-        }
-
-        int tokenStart = 0;
-        int lastCopiedIndex = 0;
-        StringBuilder? builder = null;
-
-        for (int i = 0; i <= value.Length; i += 1)
-        {
-            bool atEnd = i == value.Length;
-            if (!atEnd && !IsTokenDelimiter(value[i]))
-            {
-                continue;
-            }
-
-            string token = value.Substring(tokenStart, i - tokenStart);
-            string rewrittenToken = RewriteToken(token, patchFile, jsonPath, memberName);
-            if (!string.Equals(rewrittenToken, token, StringComparison.Ordinal))
-            {
-                builder ??= new StringBuilder(value.Length + 16);
-                builder.Append(value, lastCopiedIndex, tokenStart - lastCopiedIndex);
-                builder.Append(rewrittenToken);
-                lastCopiedIndex = i;
-            }
-
-            tokenStart = i + 1;
-        }
-
-        if (builder is null)
-        {
-            return value;
-        }
-
-        builder.Append(value, lastCopiedIndex, value.Length - lastCopiedIndex);
-        return builder.ToString();
-    }
-
-    private static string RewriteToken(string token, ComplexJsonPatchFile patchFile, string jsonPath, string memberName)
-    {
-        if (!TryExtractSymbolicId(token, out string symbolicId, out int coreStart, out int coreLength))
-        {
-            return token;
-        }
-
         if (!SymbolicIdService.TryResolveIdForSource(GameComplexDataPatchManager.PlotDataSourcePath, symbolicId, out int assignedId))
         {
             throw new InvalidOperationException(
                 $"Could not resolve symbolic ID '{symbolicId}' for '{memberName}' referenced by '{patchFile.FullPath}' at '{jsonPath}'.");
         }
 
-        string replacement = assignedId.ToString();
-        return coreStart == 0 && coreLength == token.Length
-            ? replacement
-            : token.Substring(0, coreStart) + replacement + token.Substring(coreStart + coreLength);
-    }
-
-    private static void VisitDelimitedSymbolicIds(string value, Action<string> visitor)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return;
-        }
-
-        int tokenStart = 0;
-        for (int i = 0; i <= value.Length; i += 1)
-        {
-            bool atEnd = i == value.Length;
-            if (!atEnd && !IsTokenDelimiter(value[i]))
-            {
-                continue;
-            }
-
-            string token = value.Substring(tokenStart, i - tokenStart);
-            if (TryExtractSymbolicId(token, out string symbolicId, out _, out _))
-            {
-                visitor(symbolicId);
-            }
-
-            tokenStart = i + 1;
-        }
-    }
-
-    private static bool TryExtractSymbolicId(string token, out string symbolicId, out int coreStart, out int coreLength)
-    {
-        coreStart = 0;
-        while (coreStart < token.Length && char.IsWhiteSpace(token[coreStart]))
-        {
-            coreStart += 1;
-        }
-
-        int coreEnd = token.Length - 1;
-        while (coreEnd >= coreStart && char.IsWhiteSpace(token[coreEnd]))
-        {
-            coreEnd -= 1;
-        }
-
-        if (coreEnd < coreStart)
-        {
-            symbolicId = string.Empty;
-            coreLength = 0;
-            return false;
-        }
-
-        coreLength = coreEnd - coreStart + 1;
-        string coreValue = token.Substring(coreStart, coreLength);
-        return SymbolicIdService.TryGetSymbolicId(coreValue, out symbolicId);
-    }
-
-    private static bool IsTokenDelimiter(char ch)
-    {
-        for (int i = 0; i < TokenDelimiters.Length; i += 1)
-        {
-            if (TokenDelimiters[i] == ch)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return assignedId.ToString();
     }
 
     private static void RegisterReference(string symbolicId, ComplexJsonPatchFile patchFile, string jsonPath, string referenceType)
